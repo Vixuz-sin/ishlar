@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Clone</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app" id="app" style="display:none">
+        <aside>
+            <div class="aside-header">
+                <div class="burger"><span></span><span></span><span></span></div>
+                <h1>Telegram</h1>
+                <div class="aside-icons">
+                    <span id="searchBtn">🔍</span>
+                    <span id="newChatBtn">✎</span>
+                </div>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="Search users..." oninput="searchUsers(this.value)">
+            </div>
+            <div class="chat-list" id="chatList"></div>
+            <div class="current-user">
+                <span id="currentUsername"></span>
+                <button onclick="logout()">Logout</button>
+            </div>
+        </aside>
+
+        <main>
+            <div class="main-header" id="mainHeader" style="display:none">
+                <div class="main-header-left">
+                    <div class="avatar saved small" id="chatAvatar">🔖</div>
+                    <div>
+                        <h2 id="chatName">Saved Messages</h2>
+                        <span class="status" id="chatStatus"></span>
+                    </div>
+                </div>
+                <div class="main-header-right">
+                    <span>🔍</span>
+                    <span>⋮</span>
+                </div>
+            </div>
+
+            <div class="no-chat" id="noChat">
+                <div class="no-chat-icon">💬</div>
+                <h3>Select a chat</h3>
+                <p>Choose a conversation from the left</p>
+            </div>
+
+            <div class="messages" id="messages" style="display:none"></div>
+
+            <div class="input-bar" id="inputBar" style="display:none">
+                <span class="input-emoji" id="emojiBtn">😊</span>
+                <div class="input-wrapper">
+                    <input type="text" id="messageInput" placeholder="Write a message..." onkeydown="if(event.key==='Enter')sendMessage()">
+                    <label class="attach-btn" id="attachBtn">
+                        📎
+                        <input type="file" id="fileInput" hidden onchange="uploadFile(this)" accept="image/*,video/*,audio/*">
+                    </label>
+                </div>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal" id="authModal">
+        <div class="modal-content">
+            <div class="modal-icon">✉️</div>
+            <h2>Telegram Clone</h2>
+            <p>Sign in to start messaging</p>
+            <input type="text" id="authUsername" placeholder="Username" autocomplete="off">
+            <input type="password" id="authPassword" placeholder="Password">
+            <div class="modal-error" id="authError"></div>
+            <button id="authBtn" onclick="login()">Sign In</button>
+            <span class="auth-switch" onclick="toggleAuth()">Don't have an account? Register</span>
+        </div>
+    </div>
+
+    <div class="modal" id="newChatModal" style="display:none">
+        <div class="modal-content small">
+            <h3>New Chat</h3>
+            <input type="text" id="newChatSearch" placeholder="Search users..." oninput="searchNewChat(this.value)">
+            <div class="user-list" id="userList"></div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
