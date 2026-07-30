@@ -19,7 +19,10 @@ app.register_blueprint(uploads_bp)
 
 with app.app_context():
     import models
-    db.create_all()
+    try:
+        db.create_all()
+    except Exception:
+        pass
 
 @app.route('/')
 def index():
@@ -45,5 +48,14 @@ def serve_upload(subfolder, filename):
     folder = os.path.join(Config.UPLOAD_FOLDER, subfolder)
     return send_from_directory(folder, filename)
 
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({'error': 'Internal server error', 'detail': str(e)}), 500
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'error': 'Not found'}), 404
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    debug = os.environ.get('FLASK_DEBUG', '1') == '1'
+    app.run(debug=debug)
