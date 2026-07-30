@@ -34,6 +34,13 @@ def create_chat():
     if user_id not in member_ids:
         member_ids.append(user_id)
 
+    if chat_type == 'private' and len(member_ids) == 2:
+        existing = Chat.query.filter(Chat.type == 'private').all()
+        for chat in existing:
+            mids = sorted([m.id for m in chat.members])
+            if mids == sorted(member_ids):
+                return jsonify({'chat': chat.to_dict(), 'existing': True})
+
     chat = Chat(type=chat_type, name=name)
     for mid in member_ids:
         member = db.session.get(User, mid)
@@ -81,7 +88,17 @@ def search_users():
     query = request.args.get('q', '').strip()
     if not query:
         return jsonify({'users': []})
-    users = User.query.filter(User.username.ilike(f'%{query}%'), User.id != user_id).limit(20).all()
+    
+    from sqlalchemy import or_
+    filters = [User.id != user_id]
+    
+    if query.isdigit():
+        filters.append(User.id == int(query))
+    
+    filters.append(User.username.ilike(f'%{query}%'))
+    filters.append(User.phone.ilike(f'%{query}%'))
+    
+    users = User.query.filter(or_(*filters)).limit(20).all()
     return jsonify({'users': [u.to_dict() for u in users]})
 
 @messages_bp.route('/api/send', methods=['POST'])
