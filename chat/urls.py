@@ -21,4 +21,13 @@ urlpatterns = [
     path('api/messages/<int:message_id>/edit', views.edit_message, name='edit_message'),
     path('api/upload', views.upload_file, name='upload_file'),
     path('api/upload/photo', views.upload_photo, name='upload_photo'),
+    path('api/chats/<int:chat_id>/read', views.mark_read, name='mark_read'),
+    path('api/typing', views.send_typing, name='send_typing'),
+    path('api/poll/typing', views.poll_typing, name='poll_typing'),
+    path('api/messages/<int:message_id>/forward', views.forward_message, name='forward_message'),
+    path('api/messages/<int:message_id>/react', views.react_message, name='react_message'),
+    path('api/chats/<int:chat_id>/delete', views.delete_chat, name='delete_chat'),
+    path('api/chats/<int:chat_id>/manage', views.manage_chat, name='manage_chat'),
+    path('api/messages/search', views.search_messages, name='search_messages'),
+    path('api/chats/<int:chat_id>/media', views.chat_media, name='chat_media'),
 ]

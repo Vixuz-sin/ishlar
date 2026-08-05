@@ -6,6 +6,15 @@ let pollInterval = null;
 let pendingFile = null;
 let replyToMsg = null;
 let allChats = [];
+let msgPage = 1;
+let msgTotal = 0;
+let lastTypingSent = 0;
+let mediaRecorder = null;
+let recording = false;
+let recTimer = null;
+let forwardMsgId = null;
+let reactTarget = null;
+let groupManageMode = 'add';
 
 function $(id) { return document.getElementById(id); }
 
@@ -138,6 +147,7 @@ function renderChatList(chats) {
         const isOnline = other?.online_status === 'online';
         const last = chat.last_message || {};
         const time = last.created_at ? formatTime(last.created_at) : '';
+        const unread = chat.unread_count || 0;
 
         let avatarHtml = `<div class="avatar ${isOnline ? 'online-dot' : ''}" style="background:${avatarColor(chat.id)}">${initial}</div>`;
         if (other?.avatar) {
@@ -152,6 +162,7 @@ function renderChatList(chats) {
                 </div>
                 <div class="chat-bottom">
                     <span class="chat-msg">${last.text || last.file_type || 'No messages yet'}</span>
+                    ${unread ? `<span class="chat-unread">${unread > 99 ? '99+' : unread}</span>` : ''}
                 </div>
             </div>
         `;
@@ -198,20 +209,49 @@ async function selectChat(chat) {
 
     $('messages').innerHTML = '';
     if (pollInterval) clearInterval(pollInterval);
+    msgPage = 1;
+    msgTotal = 0;
     await loadMessages(chat.id);
-    pollInterval = setInterval(() => pollNewMessages(chat.id), 1500);
+    markRead(chat.id);
+    pollInterval = setInterval(() => {
+        pollNewMessages(chat.id);
+        pollTyping(chat.id);
+    }, 1500);
+}
+
+async function markRead(chatId) {
+    try {
+        await fetch(`/api/chats/${chatId}/read`, {method:'POST', credentials:'include'});
+        loadChats();
+    } catch (e) {}
 }
 
 // ==================== MESSAGES ====================
 
 async function loadMessages(chatId) {
     try {
-        const res = await api(`/api/chats/${chatId}/messages`);
+        const res = await api(`/api/chats/${chatId}/messages?page=1`);
         const data = await res.json();
         $('messages').innerHTML = '';
         (data.messages || []).forEach(appendMessage);
         if (data.messages?.length) lastMessageId = data.messages[data.messages.length - 1].id;
+        msgTotal = data.total || 0;
         scrollToBottom();
+    } catch (e) {}
+}
+
+async function loadOlderMessages(chatId, page) {
+    try {
+        const m = $('messages');
+        const oldHeight = m.scrollHeight;
+        const res = await api(`/api/chats/${chatId}/messages?page=${page}`);
+        const data = await res.json();
+        const items = data.messages || [];
+        if (!items.length) return;
+        const frag = document.createDocumentFragment();
+        items.forEach(msg => frag.appendChild(createMessageElement(msg)));
+        m.prepend(frag);
+        m.scrollTop = m.scrollHeight - oldHeight;
     } catch (e) {}
 }
 
@@ -225,10 +265,45 @@ async function pollNewMessages(chatId) {
         });
         scrollToBottom();
         loadChats();
+        if (chatId === activeChatId) markRead(chatId);
     } catch (e) {}
 }
 
+async function pollTyping(chatId) {
+    try {
+        const res = await fetch(`/api/poll/typing?chat_id=${chatId}`, {credentials:'include'});
+        const data = await res.json();
+        const st = $('chatStatus');
+        if (!st || chatId !== activeChatId) return;
+        if (data.typing?.length) {
+            st.textContent = data.typing.length === 1 ? `${data.typing[0]} typing...` : 'typing...';
+            st.className = 'status typing';
+        } else {
+            const other = allChats.find(c => c.id === chatId)?.members.find(m => m.id !== currentUser?.id);
+            const isOnline = other?.online_status === 'online';
+            st.textContent = isOnline ? 'online' : 'offline';
+            st.className = 'status ' + (isOnline ? 'online' : 'offline');
+        }
+    } catch (e) {}
+}
+
+function sendTyping() {
+    if (!activeChatId) return;
+    const now = Date.now();
+    if (now - lastTypingSent < 2500) return;
+    lastTypingSent = now;
+    fetch('/api/typing', {
+        method:'POST', credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({chat_id: activeChatId})
+    }).catch(() => {});
+}
+
 function appendMessage(msg) {
+    $('messages').appendChild(createMessageElement(msg));
+}
+
+function createMessageElement(msg) {
     const isOwn = msg.sender?.id === currentUser?.id;
     const div = document.createElement('div');
     div.className = `msg ${isOwn ? 'msg-right' : 'msg-left'}`;
@@ -258,15 +333,26 @@ function appendMessage(msg) {
     }
 
     const edited = msg.edited ? '<span class="msg-edited">edited</span>' : '';
-    const check = isOwn ? '<span class="msg-check">✓✓</span>' : '';
+    const check = isOwn ? `<span class="msg-check">${msg.read ? '✓✓' : '✓'}</span>` : '';
     const time = formatTime(msg.created_at);
 
-    const actions = isOwn ? `
+    let reactionsHtml = '';
+    if (msg.reactions?.length) {
+        reactionsHtml = `<div class="reaction-row">${msg.reactions.map(r =>
+            `<span class="reaction ${r.reacted ? 'mine' : ''}" onclick="event.stopPropagation();reactToMessage(${msg.id}, '${r.emoji}')">${r.emoji} ${r.count}</span>`
+        ).join('')}</div>`;
+    }
+
+    const actions = `
         <div class="msg-actions">
+            <span onclick="setReply(${msg.id})" title="Reply">💬</span>
+            <span onclick="openReactions(${msg.id}, event)" title="React">😊</span>
+            <span onclick="openForward(${msg.id})" title="Forward">↗️</span>
+            ${isOwn ? `
             <span onclick="editMessage(${msg.id})" title="Edit">✏️</span>
-            <span onclick="deleteMessage(${msg.id})" title="Delete">🗑️</span>
+            <span onclick="deleteMessage(${msg.id})" title="Delete">🗑️</span>` : ''}
         </div>
-    ` : '';
+    `;
 
     div.innerHTML = actions + `
         <div class="msg-bubble ${replyHtml ? 'replying' : ''}">
@@ -274,6 +360,7 @@ function appendMessage(msg) {
             ${replyHtml}
             ${fileHtml}
             ${msg.text ? `<div class="msg-text">${esc(msg.text)}</div>` : ''}
+            ${reactionsHtml}
             <div class="msg-meta">
                 ${edited} <span class="msg-time">${time}</span> ${check}
             </div>
@@ -284,7 +371,7 @@ function appendMessage(msg) {
         if (e.target.closest('.msg-actions')) return;
     };
 
-    $('messages').appendChild(div);
+    return div;
 }
 
 function scrollToMsg(id) {
@@ -316,7 +403,6 @@ async function sendMessage() {
         return;
     }
 
-    $('messageInput').value = '';
     const payload = {chat_id: activeChatId, text};
     if (replyToMsg) payload.reply_to = replyToMsg.id;
     cancelReply();
@@ -328,6 +414,7 @@ async function sendMessage() {
         });
         const data = await res.json();
         if (data.message) {
+            $('messageInput').value = '';
             appendMessage(data.message);
             lastMessageId = data.message.id;
             scrollToBottom(); loadChats();
@@ -400,6 +487,290 @@ async function uploadFile(input) {
     input.value = '';
 }
 
+// ==================== VOICE MESSAGES ====================
+
+async function startRecording() {
+    if (recording) return;
+    if (!navigator.mediaDevices?.getUserMedia) { showToast('Mic not supported'); return; }
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        mediaRecorder = new MediaRecorder(stream);
+        const chunks = [];
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.onstop = async () => {
+            stream.getTracks().forEach(t => t.stop());
+            $('recordingBar').style.display = 'none';
+            $('micBtn').classList.remove('active');
+            clearInterval(recTimer);
+            const blob = new Blob(chunks, {type:'audio/webm'});
+            if (!blob.size || !activeChatId) return;
+            const fd = new FormData();
+            fd.append('file', blob, 'voice.webm');
+            fd.append('chat_id', activeChatId);
+            try {
+                const res = await api('/api/upload', {method:'POST', body:fd});
+                const data = await res.json();
+                if (data.message) {
+                    appendMessage(data.message);
+                    lastMessageId = data.message.id;
+                    scrollToBottom(); loadChats();
+                }
+            } catch (e) { if (e.message !== 'Not authenticated') showToast('Upload failed'); }
+        };
+        mediaRecorder.start();
+        recording = true;
+        $('micBtn').classList.add('active');
+        $('recordingBar').style.display = 'flex';
+        let secs = 0;
+        recTimer = setInterval(() => {
+            secs++;
+            $('recTime').textContent = Math.floor(secs/60) + ':' + String(secs%60).padStart(2,'0');
+            if (secs >= 60) stopRecording();
+        }, 1000);
+    } catch (e) { showToast('Mic access denied'); }
+}
+
+function stopRecording() {
+    if (mediaRecorder && recording) { mediaRecorder.stop(); recording = false; }
+}
+
+// ==================== FORWARD ====================
+
+function openForward(msgId) {
+    forwardMsgId = msgId;
+    $('forwardModal').style.display = 'flex';
+    const list = $('forwardList'); list.innerHTML = '';
+    if (!allChats.length) { list.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:10px">No chats</p>'; return; }
+    allChats.forEach(c => {
+        const other = c.members.find(m => m.id !== currentUser?.id);
+        const name = c.name || other?.username || 'Saved Messages';
+        const div = document.createElement('div');
+        div.className = 'user-item';
+        div.innerHTML = `<div class="avatar" style="background:#2AABEE">${(name[0]||'#').toUpperCase()}</div><span>${esc(name)}</span>`;
+        div.onclick = () => doForward(c.id);
+        list.appendChild(div);
+    });
+}
+
+async function doForward(chatId) {
+    if (!forwardMsgId) return;
+    try {
+        const res = await api(`/api/messages/${forwardMsgId}/forward`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({chat_ids:[chatId]})
+        });
+        $('forwardModal').style.display = 'none';
+        forwardMsgId = null;
+        showToast('Forwarded');
+        loadChats();
+    } catch (e) {}
+}
+
+// ==================== CHAT MENU / DELETE CHAT ====================
+
+function openChatMenu() {
+    const chat = allChats.find(c => c.id === activeChatId);
+    if (!chat) return;
+    $('chatMenuTitle').textContent = chat.name || chat.members.find(m => m.id !== currentUser?.id)?.username || 'Chat';
+    document.querySelectorAll('.group-only').forEach(el =>
+        el.style.display = chat.type === 'group' ? 'flex' : 'none');
+    $('chatMenuModal').style.display = 'flex';
+}
+
+async function removeChat() {
+    $('chatMenuModal').style.display = 'none';
+    if (!confirm('Delete this chat?')) return;
+    try {
+        await api(`/api/chats/${activeChatId}/delete`, {method:'DELETE'});
+        activeChatId = null;
+        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        $('chatView').style.display = 'none';
+        $('noChat').style.display = 'flex';
+        await loadChats();
+        showSidebar();
+    } catch (e) {}
+}
+
+// ==================== GROUP MANAGE ====================
+
+async function openGroupManage(mode) {
+    groupManageMode = mode;
+    $('chatMenuModal').style.display = 'none';
+    $('groupManageTitle').textContent = mode === 'remove' ? 'Remove Member' : 'Add Members';
+    $('groupManageModal').style.display = 'flex';
+    $('groupAddSearch').value = '';
+    $('groupAddList').innerHTML = '';
+    if (mode === 'remove') {
+        const chat = allChats.find(c => c.id === activeChatId);
+        const list = $('groupMembersList'); list.innerHTML = '';
+        (chat?.members || []).forEach(u => {
+            if (u.id === currentUser?.id) return;
+            const div = document.createElement('div');
+            div.className = 'user-item';
+            div.innerHTML = `<div class="avatar" style="background:#2AABEE">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span><span style="color:var(--danger);margin-left:auto">✕</span>`;
+            div.onclick = () => removeGroupMember(u.id);
+            list.appendChild(div);
+        });
+    } else {
+        $('groupMembersList').innerHTML = '';
+        renderGroupAddSearch('');
+    }
+}
+
+function renderGroupAddSearch(q) {
+    const url = q ? `/api/users/search?q=${encodeURIComponent(q)}` : '/api/users';
+    fetch(url, {credentials:'include'}).then(r => r.json()).then(data => {
+        const ul = $('groupAddList'); ul.innerHTML = '';
+        const chat = allChats.find(c => c.id === activeChatId);
+        const memberIds = (chat?.members || []).map(m => m.id);
+        (data.users || []).forEach(u => {
+            if (memberIds.includes(u.id)) return;
+            const div = document.createElement('div');
+            div.className = 'user-item';
+            div.innerHTML = `<div class="avatar" style="background:#2AABEE">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
+            div.onclick = async () => {
+                try {
+                    await api(`/api/chats/${activeChatId}/manage`, {
+                        method:'POST', headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({action:'add_members', member_ids:[u.id]})
+                    });
+                    showToast(`${u.username} added`);
+                    await loadChats();
+                    openGroupManage('add');
+                } catch (e) {}
+            };
+            ul.appendChild(div);
+        });
+    }).catch(() => {});
+}
+
+async function removeGroupMember(userId) {
+    if (!confirm('Remove this member?')) return;
+    try {
+        await api(`/api/chats/${activeChatId}/manage`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({action:'remove_member', user_id:userId})
+        });
+        showToast('Removed');
+        await loadChats();
+        openGroupManage('remove');
+    } catch (e) {}
+}
+
+async function renameGroup() {
+    $('chatMenuModal').style.display = 'none';
+    const chat = allChats.find(c => c.id === activeChatId);
+    const name = prompt('New group name:', chat?.name || '');
+    if (!name) return;
+    try {
+        await api(`/api/chats/${activeChatId}/manage`, {
+            method:'PATCH', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({action:'rename', name})
+        });
+        showToast('Renamed');
+        await loadChats();
+    } catch (e) {}
+}
+
+// ==================== REACTIONS ====================
+
+function openReactions(msgId, e) {
+    e.stopPropagation();
+    reactTarget = msgId;
+    let picker = $('reactionPicker');
+    if (!picker) {
+        picker = document.createElement('div');
+        picker.id = 'reactionPicker';
+        picker.style.cssText = 'position:fixed;background:var(--bg-aside);border:1px solid var(--border);border-radius:12px;padding:6px;display:none;gap:2px;z-index:150;box-shadow:var(--shadow)';
+        ['👍','❤️','😂','😮','😢','🔥'].forEach(em => {
+            const s = document.createElement('span');
+            s.textContent = em;
+            s.style.cssText = 'width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;border-radius:8px;transition:0.15s';
+            s.onmouseenter = function() { this.style.background = 'var(--bg-hover)'; };
+            s.onmouseleave = function() { this.style.background = 'transparent'; };
+            s.onclick = () => { reactToMessage(reactTarget, em); picker.style.display = 'none'; };
+            picker.appendChild(s);
+        });
+        document.body.appendChild(picker);
+    }
+    const x = Math.min(e.clientX || window.innerWidth/2, window.innerWidth - 280);
+    const y = Math.max(10, (e.clientY || 100) - 56);
+    picker.style.display = 'flex';
+    picker.style.left = x + 'px';
+    picker.style.top = y + 'px';
+}
+
+async function reactToMessage(msgId, emoji) {
+    try {
+        const res = await api(`/api/messages/${msgId}/react`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({emoji})
+        });
+        const data = await res.json();
+        if (data.message) {
+            const old = document.querySelector(`[data-msg-id="${msgId}"]`);
+            if (old) old.replaceWith(createMessageElement(data.message));
+        }
+    } catch (e) {}
+}
+
+// ==================== CHAT SEARCH ====================
+
+async function searchInChat(q) {
+    try {
+        const res = await api(`/api/messages/search?chat_id=${activeChatId}&q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        $('messages').innerHTML = '';
+        (data.messages || []).slice().reverse().forEach(appendMessage);
+    } catch (e) {}
+}
+
+// ==================== MEDIA GALLERY ====================
+
+async function openMedia() {
+    $('chatMenuModal').style.display = 'none';
+    try {
+        const res = await api(`/api/chats/${activeChatId}/media`);
+        const data = await res.json();
+        const grid = $('mediaGrid'); grid.innerHTML = '';
+        const list = data.media || [];
+        if (!list.length) {
+            grid.innerHTML = '<p style="text-align:center;color:var(--text-muted);grid-column:1/-1;padding:20px">No media yet</p>';
+        }
+        list.forEach(m => {
+            const d = document.createElement('div');
+            d.className = 'media-item';
+            if (m.file_type === 'photo') {
+                d.innerHTML = `<img src="${m.file_path}" onclick="window.open(this.src)" loading="lazy">`;
+            } else {
+                d.innerHTML = `<video src="${m.file_path}" preload="metadata" muted onclick="window.open('${m.file_path}')"></video>`;
+            }
+            grid.appendChild(d);
+        });
+        $('mediaModal').style.display = 'flex';
+    } catch (e) {}
+}
+
+// ==================== THEME ====================
+
+function applyTheme() {
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.dataset.theme = saved;
+    updateThemeBtn();
+}
+
+function toggleTheme() {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+    localStorage.setItem('theme', root.dataset.theme);
+    updateThemeBtn();
+}
+
+function updateThemeBtn() {
+    const btn = $('themeBtn');
+    if (btn) btn.textContent = document.documentElement.dataset.theme === 'light' ? '🌙 Dark mode' : '☀️ Light mode';
+}
+
 // ==================== SEARCH ====================
 
 let searchTimeout = null;
@@ -463,7 +834,8 @@ function renderUserList(users) {
 let groupMembers = [];
 
 function renderGroupSearch(query) {
-    fetch(`/api/users/search?q=${encodeURIComponent(query)}`, {credentials:'include'})
+    const url = query ? `/api/users/search?q=${encodeURIComponent(query)}` : '/api/users';
+    fetch(url, {credentials:'include'})
         .then(r => r.json()).then(data => {
             const ul = $('groupUserList'); ul.innerHTML = '';
             (data.users || []).forEach(u => {
@@ -589,6 +961,10 @@ function esc(text) {
 // ==================== EVENT LISTENERS ====================
 
 document.addEventListener('DOMContentLoaded', async () => {
+    applyTheme();
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
     try {
         const res = await fetch('/api/me', {credentials:'include'});
         if (res.ok) {
@@ -602,6 +978,47 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Message input enter key
 $('messageInput').onkeydown = function(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+};
+
+// Typing indicator
+$('messageInput').oninput = sendTyping;
+
+// Send button
+$('sendBtn').onclick = sendMessage;
+
+// File input
+$('fileInput').onchange = function() { uploadFile(this); };
+
+// Mic button
+$('micBtn').onclick = startRecording;
+$('recStop').onclick = stopRecording;
+
+// Chat menu
+$('chatMenuBtn').onclick = openChatMenu;
+
+// Chat search
+$('chatSearchBtn').onclick = () => {
+    const sb = $('chatSearch');
+    sb.style.display = sb.style.display === 'none' ? 'block' : 'none';
+    if (sb.style.display === 'block') $('chatSearchInput').focus();
+};
+$('chatSearchClose').onclick = () => {
+    $('chatSearch').style.display = 'none';
+    $('chatSearchInput').value = '';
+    if (activeChatId) loadMessages(activeChatId);
+};
+$('chatSearchInput').oninput = function() {
+    const q = this.value.trim();
+    if (q) searchInChat(q);
+    else loadMessages(activeChatId);
+};
+
+// Load older messages on scroll up
+$('messages').onscroll = function() {
+    if (this.scrollTop < 40 && msgPage * 50 < msgTotal) {
+        msgPage++;
+        loadOlderMessages(activeChatId, msgPage);
+    }
 };
 
 // Sidebar burger
@@ -618,6 +1035,33 @@ $('newChatBtn').onclick = () => {
     $('newChatSearch').value = '';
     $('userList').innerHTML = '';
     searchNewChat('');
+};
+
+// New chat search
+$('newChatSearch').oninput = function() {
+    searchNewChat(this.value.trim());
+};
+
+// Open group creation modal
+function openNewGroup() {
+    $('newChatModal').style.display = 'none';
+    $('newGroupModal').style.display = 'flex';
+    $('groupName').value = '';
+    $('groupSearch').value = '';
+    groupMembers = [];
+    renderSelectedUsers();
+    $('groupUserList').innerHTML = '';
+    renderGroupSearch('');
+}
+
+// Group member search
+$('groupSearch').oninput = function() {
+    renderGroupSearch(this.value.trim());
+};
+
+// Group add-member search
+$('groupAddSearch').oninput = function() {
+    renderGroupAddSearch(this.value.trim());
 };
 
 // New group button (in icons - use ✎ long press or add a separate way)
@@ -694,7 +1138,28 @@ $('emojiBtn').onclick = function() {
 document.addEventListener('click', function(e) {
     const msgEl = e.target.closest('.msg');
     if (!msgEl) return;
-    if (e.target.closest('.msg-actions') || e.target.closest('.msg-file') || e.target.closest('.reply-badge')) return;
+    if (e.target.closest('.msg-actions') || e.target.closest('.msg-file') || e.target.closest('.reply-badge') || e.target.closest('.reaction-row')) return;
     const msgId = parseInt(msgEl.dataset.msgId);
     if (msgId) setReply(msgId);
+});
+
+// Long press on mobile to show message actions
+let longPressTimer = null;
+document.addEventListener('touchstart', function(e) {
+    const msgEl = e.target.closest('.msg');
+    if (!msgEl || e.target.closest('.msg-actions')) return;
+    const actions = msgEl.querySelector('.msg-actions');
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+        document.querySelectorAll('.msg-actions').forEach(a => a.style.display = 'none');
+        if (actions) actions.style.display = 'flex';
+        if (navigator.vibrate) navigator.vibrate(15);
+    }, 400);
+});
+document.addEventListener('touchend', () => clearTimeout(longPressTimer));
+document.addEventListener('touchmove', () => clearTimeout(longPressTimer));
+document.addEventListener('touchstart', function(e) {
+    if (!e.target.closest('.msg-actions')) {
+        document.querySelectorAll('.msg-actions').forEach(a => a.style.display = 'none');
+    }
 });

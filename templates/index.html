@@ -4,6 +4,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#17212b">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
 <title>Telegram</title>
 <link rel="stylesheet" href="{% static 'style.css' %}">
 </head>
@@ -63,6 +67,11 @@
         </div>
       </div>
 
+      <div class="chat-search" id="chatSearch" style="display:none">
+        <input type="text" id="chatSearchInput" placeholder="Search messages..." autocomplete="off">
+        <span id="chatSearchClose">✕</span>
+      </div>
+
       <div class="messages" id="messages"></div>
 
       <div class="reply-preview" id="replyPreview" style="display:none">
@@ -71,6 +80,11 @@
           <span class="reply-text" id="replyText"></span>
         </div>
         <span class="reply-close" id="replyClose">✕</span>
+      </div>
+
+      <div class="recording-bar" id="recordingBar" style="display:none">
+        <span class="rec-dot"></span> Recording <span id="recTime">0:00</span>
+        <button id="recStop">Stop</button>
       </div>
 
       <div class="input-bar">
@@ -82,6 +96,7 @@
             <input type="file" id="fileInput" hidden multiple accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.zip">
           </label>
         </div>
+        <span class="input-emoji mic-btn" id="micBtn" title="Voice message">🎤</span>
         <button class="send-btn" id="sendBtn">➤</button>
       </div>
     </div>
@@ -106,6 +121,7 @@
     <h3>New Chat</h3>
     <input type="text" id="newChatSearch" placeholder="Search users..." autocomplete="off">
     <div class="user-list" id="userList"></div>
+    <button id="newGroupOpenBtn" onclick="openNewGroup()" style="margin-top:10px">New Group</button>
   </div>
 </div>
 
@@ -127,6 +143,43 @@
     <input type="text" id="profileBio" placeholder="Bio" maxlength="128">
     <input type="text" id="profilePhone" placeholder="Phone">
     <button onclick="updateProfile()">Save</button>
+    <button id="themeBtn" style="margin-top:8px" onclick="toggleTheme()"></button>
+  </div>
+</div>
+
+<div class="modal" id="chatMenuModal" style="display:none">
+  <div class="modal-content small">
+    <h3 id="chatMenuTitle">Chat</h3>
+    <div class="menu-list">
+      <div class="menu-item" onclick="openMedia()">🖼️ Media</div>
+      <div class="menu-item group-only" onclick="openGroupManage('add')">👥 Add members</div>
+      <div class="menu-item group-only" onclick="openGroupManage('remove')">🚫 Remove member</div>
+      <div class="menu-item group-only" onclick="renameGroup()">✏️ Rename group</div>
+      <div class="menu-item danger" onclick="removeChat()">🗑️ Delete chat</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="groupManageModal" style="display:none">
+  <div class="modal-content small">
+    <h3 id="groupManageTitle">Manage Group</h3>
+    <div class="user-list" id="groupMembersList"></div>
+    <input type="text" id="groupAddSearch" placeholder="Add members..." autocomplete="off">
+    <div class="user-list" id="groupAddList"></div>
+  </div>
+</div>
+
+<div class="modal" id="forwardModal" style="display:none">
+  <div class="modal-content small">
+    <h3>Forward to...</h3>
+    <div class="user-list" id="forwardList"></div>
+  </div>
+</div>
+
+<div class="modal" id="mediaModal" style="display:none">
+  <div class="modal-content small">
+    <h3>Media</h3>
+    <div class="media-grid" id="mediaGrid"></div>
   </div>
 </div>
 
