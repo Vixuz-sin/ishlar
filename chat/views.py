@@ -2,7 +2,7 @@ import os
 import hashlib
 from django.conf import settings
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import Q, Count as models
 from django.contrib.auth import authenticate, login as dj_login, logout as dj_logout
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -103,10 +103,13 @@ def chats(request):
         member_ids.append(request.user.id)
 
     if chat_type == 'private' and len(member_ids) == 2:
-        existing = Chat.objects.filter(type='private').prefetch_related('members')
+        mids = sorted(member_ids)
+        existing = Chat.objects.filter(type='private', members__id__in=member_ids)\
+            .annotate(mcnt=models.Count('members'))\
+            .filter(mcnt=len(member_ids))
         for chat in existing:
-            mids = sorted([m.id for m in chat.members.all()])
-            if mids == sorted(member_ids):
+            chat_mids = sorted(chat.members.values_list('id', flat=True))
+            if chat_mids == mids:
                 return Response({'chat': ChatSerializer(chat).data, 'existing': True})
 
     chat = Chat.objects.create(type=chat_type, name=name)
@@ -124,6 +127,9 @@ def chat_detail(request, chat_id):
         chat = Chat.objects.get(id=chat_id)
     except Chat.DoesNotExist:
         return Response({'error': 'Chat not found'}, status=404)
+
+    if not chat.members.filter(id=request.user.id).exists():
+        return Response({'error': 'Forbidden'}, status=403)
 
     if request.method == 'GET':
         return Response({'chat': ChatSerializer(chat).data})
@@ -155,10 +161,52 @@ def chat_detail(request, chat_id):
         return Response({'message': MessageSerializer(msg).data}, status=201)
 
 
+@csrf_exempt
+@api_view(['POST'])
+def send_message(request):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+
+    try:
+        chat_id = int(request.data.get('chat_id'))
+    except (TypeError, ValueError):
+        return Response({'error': 'chat_id required'}, status=400)
+
+    try:
+        chat = Chat.objects.get(id=chat_id)
+    except Chat.DoesNotExist:
+        return Response({'error': 'Chat not found'}, status=404)
+
+    if not chat.members.filter(id=request.user.id).exists():
+        return Response({'error': 'Forbidden'}, status=403)
+
+    text = request.data.get('text', '').strip()
+    if not text:
+        return Response({'error': 'Text required'}, status=400)
+
+    reply_to = None
+    reply_to_id = request.data.get('reply_to', None)
+    if reply_to_id:
+        try:
+            reply_to = Message.objects.get(id=int(reply_to_id))
+        except (ValueError, Message.DoesNotExist):
+            pass
+
+    msg = Message.objects.create(
+        chat=chat, sender=request.user, text=text, reply_to=reply_to
+    )
+    chat.last_message = msg
+    chat.save(update_fields=['last_message'])
+    return Response({'message': MessageSerializer(msg).data}, status=201)
+
+
 @api_view(['GET'])
 def chat_messages(request, chat_id):
     if not request.user.is_authenticated:
         return Response({'error': 'Not authenticated'}, status=401)
+
+    if not Chat.objects.filter(id=chat_id, members__id=request.user.id).exists():
+        return Response({'error': 'Forbidden'}, status=403)
 
     try:
         page = int(request.query_params.get('page', 1))
@@ -278,7 +326,7 @@ def upload_file(request):
         return Response({'error': 'Invalid chat_id'}, status=400)
 
     ext = os.path.splitext(file.name)[1]
-    raw_name = hashlib.md5(f"{timezone.now()}{file.name}".encode()).hexdigest()
+    raw_name = hashlib.sha256(f"{timezone.now()}{file.name}".encode()).hexdigest()[:32]
     ftype = file.content_type.split('/')[0] if '/' in file.content_type else 'file'
     subfolder = f"{ftype}s"
     filename = f"{raw_name}{ext}"
@@ -315,7 +363,7 @@ def upload_photo(request):
     if not file:
         return Response({'error': 'No file'}, status=400)
     ext = os.path.splitext(file.name)[1]
-    raw_name = hashlib.md5(f"{timezone.now()}{file.name}".encode()).hexdigest()
+    raw_name = hashlib.sha256(f"{timezone.now()}{file.name}".encode()).hexdigest()[:32]
     filename = f"{raw_name}{ext}"
     upload_dir = os.path.join(settings.MEDIA_ROOT, 'avatars')
     os.makedirs(upload_dir, exist_ok=True)

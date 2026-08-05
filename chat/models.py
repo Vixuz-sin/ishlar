@@ -10,9 +10,6 @@ class User(AbstractUser):
     last_online = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(default=timezone.now)
 
-    groups = None
-    user_permissions = None
-
     def __str__(self):
         return self.username
 
