@@ -15,6 +15,10 @@ let recTimer = null;
 let forwardMsgId = null;
 let reactTarget = null;
 let groupManageMode = 'add';
+let pinnedMsgId = null;
+let profileUserId = null;
+let profileUserChatId = null;
+let pollOptionCount = 2;
 
 function $(id) { return document.getElementById(id); }
 
@@ -142,26 +146,34 @@ function renderChatList(chats) {
         div.dataset.chatId = chat.id;
 
         const other = chat.members.find(m => m.id !== currentUser?.id);
+        const isChannel = chat.type === 'channel';
         const name = chat.name || other?.username || 'Saved Messages';
         const initial = (name[0] || '#').toUpperCase();
-        const isOnline = other?.online_status === 'online';
+        const isOnline = other?.online_status === 'online' && !isChannel;
         const last = chat.last_message || {};
         const time = last.created_at ? formatTime(last.created_at) : '';
         const unread = chat.unread_count || 0;
 
-        let avatarHtml = `<div class="avatar ${isOnline ? 'online-dot' : ''}" style="background:${avatarColor(chat.id)}">${initial}</div>`;
-        if (other?.avatar) {
+        let avatarHtml;
+        if (isChannel) {
+            avatarHtml = '<div class="avatar" style="background:var(--bg-search)">📢</div>';
+        } else if (other?.avatar) {
             avatarHtml = `<div class="avatar ${isOnline ? 'online-dot' : ''}"><img src="${other.avatar}"></div>`;
+        } else {
+            avatarHtml = `<div class="avatar ${isOnline ? 'online-dot' : ''}" style="background:${avatarColor(chat.id)}">${initial}</div>`;
         }
+
+        let lastText = last.poll ? '📊 Poll' : (last.text || last.file_type || 'No messages yet');
+        if (last.is_scheduled) lastText = '⏰ ' + lastText;
 
         div.innerHTML = avatarHtml + `
             <div class="chat-preview">
                 <div class="chat-top">
-                    <span class="chat-name">${esc(name)}</span>
+                    <span class="chat-name">${esc(name)}${isChannel ? '<span class="channel-tag">CH</span>' : ''}</span>
                     <span class="chat-time">${time}</span>
                 </div>
                 <div class="chat-bottom">
-                    <span class="chat-msg">${last.text || last.file_type || 'No messages yet'}</span>
+                    <span class="chat-msg">${esc(lastText)}</span>
                     ${unread ? `<span class="chat-unread">${unread > 99 ? '99+' : unread}</span>` : ''}
                 </div>
             </div>
@@ -187,17 +199,27 @@ async function selectChat(chat) {
     if (el) el.classList.add('active');
 
     const other = chat.members.find(m => m.id !== currentUser?.id);
+    const isChannel = chat.type === 'channel';
     const name = chat.name || other?.username || 'Saved Messages';
-    const isOnline = other?.online_status === 'online';
+    const isOnline = other?.online_status === 'online' && !isChannel;
 
     $('noChat').style.display = 'none';
     $('chatView').style.display = 'flex';
     $('chatName').textContent = name;
-    $('chatStatus').textContent = isOnline ? 'online' : 'offline';
-    $('chatStatus').className = 'status ' + (isOnline ? 'online' : 'offline');
+    if (isChannel) {
+        $('chatStatus').textContent = (chat.is_owner ? 'Owner · ' : '') + (chat.members?.length || 0) + ' subscribers';
+        $('chatStatus').className = 'status';
+    } else {
+        $('chatStatus').textContent = isOnline ? 'online' : 'offline';
+        $('chatStatus').className = 'status ' + (isOnline ? 'online' : 'offline');
+    }
 
     const ca = $('chatAvatar');
-    if (other?.avatar) {
+    if (isChannel) {
+        ca.textContent = '📢';
+        ca.style.background = 'var(--bg-search)';
+        ca.className = 'avatar small';
+    } else if (other?.avatar) {
         ca.innerHTML = `<img src="${other.avatar}">`;
         ca.className = 'avatar small';
     } else {
@@ -206,6 +228,9 @@ async function selectChat(chat) {
         ca.className = 'avatar small';
     }
     if (isOnline) ca.classList.add('online-dot');
+
+    $('inputBar').style.display = (isChannel && !chat.is_owner) ? 'none' : 'flex';
+    showPinnedBar(chat);
 
     $('messages').innerHTML = '';
     if (pollInterval) clearInterval(pollInterval);
@@ -224,6 +249,16 @@ async function markRead(chatId) {
         await fetch(`/api/chats/${chatId}/read`, {method:'POST', credentials:'include'});
         loadChats();
     } catch (e) {}
+}
+
+function showPinnedBar(chat) {
+    const bar = $('pinnedBar');
+    const pin = chat?.pinned_message;
+    if (!pin) { bar.style.display = 'none'; pinnedMsgId = null; return; }
+    pinnedMsgId = pin.id;
+    $('pinnedSender').textContent = pin.sender?.username || 'You';
+    $('pinnedText').textContent = (pin.text || pin.file_type || 'Message').slice(0, 60);
+    bar.style.display = 'flex';
 }
 
 // ==================== MESSAGES ====================
@@ -275,6 +310,8 @@ async function pollTyping(chatId) {
         const data = await res.json();
         const st = $('chatStatus');
         if (!st || chatId !== activeChatId) return;
+        const chat = allChats.find(c => c.id === chatId);
+        if (chat?.type === 'channel') return;
         if (data.typing?.length) {
             st.textContent = data.typing.length === 1 ? `${data.typing[0]} typing...` : 'typing...';
             st.className = 'status typing';
@@ -306,7 +343,7 @@ function appendMessage(msg) {
 function createMessageElement(msg) {
     const isOwn = msg.sender?.id === currentUser?.id;
     const div = document.createElement('div');
-    div.className = `msg ${isOwn ? 'msg-right' : 'msg-left'}`;
+    div.className = `msg ${isOwn ? 'msg-right' : 'msg-left'}` + (msg.pinned ? ' pinned-msg' : '');
     div.dataset.msgId = msg.id;
 
     let fileHtml = '';
@@ -335,6 +372,11 @@ function createMessageElement(msg) {
     const edited = msg.edited ? '<span class="msg-edited">edited</span>' : '';
     const check = isOwn ? `<span class="msg-check">${msg.read ? '✓✓' : '✓'}</span>` : '';
     const time = formatTime(msg.created_at);
+    const pinBadge = msg.pinned ? '<span class="pin-badge">📌</span>' : '';
+    const schedBadge = msg.is_scheduled ? `<span class="sched-badge">⏰ ${formatSched(msg.scheduled_at)}</span> ` : '';
+
+    let pollHtml = '';
+    if (msg.poll) pollHtml = renderPoll(msg.poll);
 
     let reactionsHtml = '';
     if (msg.reactions?.length) {
@@ -348,6 +390,7 @@ function createMessageElement(msg) {
             <span onclick="setReply(${msg.id})" title="Reply">💬</span>
             <span onclick="openReactions(${msg.id}, event)" title="React">😊</span>
             <span onclick="openForward(${msg.id})" title="Forward">↗️</span>
+            <span onclick="togglePin(${msg.id})" title="${msg.pinned ? 'Unpin' : 'Pin'}">📌</span>
             ${isOwn ? `
             <span onclick="editMessage(${msg.id})" title="Edit">✏️</span>
             <span onclick="deleteMessage(${msg.id})" title="Delete">🗑️</span>` : ''}
@@ -359,10 +402,11 @@ function createMessageElement(msg) {
             ${!isOwn && msg.sender ? `<div class="msg-sender">${esc(msg.sender.username)}</div>` : ''}
             ${replyHtml}
             ${fileHtml}
-            ${msg.text ? `<div class="msg-text">${esc(msg.text)}</div>` : ''}
+            ${pollHtml}
+            ${msg.text ? `<div class="msg-text">${md(msg.text)}</div>` : ''}
             ${reactionsHtml}
             <div class="msg-meta">
-                ${edited} <span class="msg-time">${time}</span> ${check}
+                ${schedBadge}${pinBadge} ${edited} <span class="msg-time">${time}</span> ${check}
             </div>
         </div>
     `;
@@ -394,6 +438,7 @@ async function sendMessage() {
         try {
             const res = await api('/api/upload', {method:'POST', body:fd});
             const data = await res.json();
+            if (data.error) { showToast(data.error); return; }
             if (data.message) {
                 appendMessage(data.message);
                 lastMessageId = data.message.id;
@@ -413,6 +458,7 @@ async function sendMessage() {
             body: JSON.stringify(payload)
         });
         const data = await res.json();
+        if (data.error) { showToast(data.error); return; }
         if (data.message) {
             $('messageInput').value = '';
             appendMessage(data.message);
@@ -572,8 +618,17 @@ function openChatMenu() {
     const chat = allChats.find(c => c.id === activeChatId);
     if (!chat) return;
     $('chatMenuTitle').textContent = chat.name || chat.members.find(m => m.id !== currentUser?.id)?.username || 'Chat';
+    const isGroup = chat.type === 'group';
+    const isChannel = chat.type === 'channel';
+    const isPrivate = chat.type === 'private';
     document.querySelectorAll('.group-only').forEach(el =>
-        el.style.display = chat.type === 'group' ? 'flex' : 'none');
+        el.style.display = isGroup ? 'flex' : 'none');
+    document.querySelectorAll('.private-only').forEach(el =>
+        el.style.display = isPrivate ? 'flex' : 'none');
+    document.querySelectorAll('.channel-only').forEach(el =>
+        el.style.display = isChannel ? 'flex' : 'none');
+    document.querySelectorAll('.owner-only').forEach(el =>
+        el.style.display = (isGroup && chat.is_owner) ? 'flex' : 'none');
     $('chatMenuModal').style.display = 'flex';
 }
 
@@ -586,6 +641,8 @@ async function removeChat() {
         if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
         $('chatView').style.display = 'none';
         $('noChat').style.display = 'flex';
+        $('pinnedBar').style.display = 'none';
+        pinnedMsgId = null;
         await loadChats();
         showSidebar();
     } catch (e) {}
@@ -751,24 +808,34 @@ async function openMedia() {
     } catch (e) {}
 }
 
-// ==================== THEME ====================
+// ==================== THEME (Auto / Light / Dark / Night Vision) ====================
 
 function applyTheme() {
-    const saved = localStorage.getItem('theme') || 'dark';
-    document.documentElement.dataset.theme = saved;
+    const saved = localStorage.getItem('theme') || 'auto';
+    if (saved === 'auto') {
+        document.documentElement.dataset.theme =
+            window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    } else {
+        document.documentElement.dataset.theme = saved;
+    }
     updateThemeBtn();
 }
 
-function toggleTheme() {
-    const root = document.documentElement;
-    root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
-    localStorage.setItem('theme', root.dataset.theme);
-    updateThemeBtn();
+function cycleTheme() {
+    const order = ['auto', 'light', 'dark', 'night'];
+    const cur = localStorage.getItem('theme') || 'auto';
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    localStorage.setItem('theme', next);
+    applyTheme();
+    showToast('Theme: ' + ({auto:'Auto', light:'Light', dark:'Dark', night:'Night vision'}[next]));
 }
 
 function updateThemeBtn() {
     const btn = $('themeBtn');
-    if (btn) btn.textContent = document.documentElement.dataset.theme === 'light' ? '🌙 Dark mode' : '☀️ Light mode';
+    if (!btn) return;
+    const saved = localStorage.getItem('theme') || 'auto';
+    const labels = {auto:'🎨 Auto theme', light:'☀️ Light mode', dark:'🌙 Dark mode', night:'🌌 Night vision'};
+    btn.textContent = labels[saved];
 }
 
 // ==================== SEARCH ====================
@@ -909,10 +976,15 @@ async function openProfile() {
     $('profileModal').style.display = 'flex';
     const pa = $('profileAvatar');
     if (currentUser?.avatar) {
-        pa.innerHTML = `<img src="${currentUser.avatar}">`;
+        pa.innerHTML = `<img src="${currentUser.avatar}"><span class="avatar-change">📷</span>`;
+        pa.style.background = '';
     } else {
         pa.textContent = (currentUser?.username || '?')[0].toUpperCase();
         pa.style.background = avatarColor(currentUser?.id || 0);
+        const badge = document.createElement('span');
+        badge.className = 'avatar-change';
+        badge.textContent = '📷';
+        pa.appendChild(badge);
     }
     $('profileBio').value = currentUser?.bio || '';
     $('profilePhone').value = currentUser?.phone || '';
@@ -931,6 +1003,290 @@ async function updateProfile() {
         $('profileModal').style.display = 'none';
         showToast('Profile updated');
     } catch (e) {}
+}
+
+// ==================== USER PROFILE (OTHER USERS) ====================
+
+async function openUserProfile() {
+    const chat = allChats.find(c => c.id === activeChatId);
+    if (!chat || chat.type !== 'private') return;
+    const other = chat.members.find(m => m.id !== currentUser?.id);
+    if (!other) return;
+    $('chatMenuModal').style.display = 'none';
+    try {
+        const res = await api(`/api/users/${other.id}`);
+        const data = await res.json();
+        const u = data.user;
+        profileUserId = u.id;
+        profileUserChatId = u.chat_id;
+        const pa = $('upAvatar');
+        if (u.avatar) {
+            pa.innerHTML = `<img src="${u.avatar}">`;
+            pa.style.background = '';
+        } else {
+            pa.innerHTML = '';
+            pa.textContent = u.username[0].toUpperCase();
+            pa.style.background = avatarColor(u.id);
+        }
+        $('upName').textContent = u.username;
+        $('upStatus').textContent = u.online_status === 'online' ? '🟢 online' : '🔴 offline';
+        $('upBio').textContent = u.bio || (u.phone ? '📞 ' + u.phone : '');
+        const blockBtn = $('upBlockBtn');
+        blockBtn.textContent = u.is_blocked ? '🔓 Unblock' : '🚫 Block';
+        blockBtn.className = u.is_blocked ? 'btn-soft' : 'danger';
+        $('upMessageBtn').style.display = profileUserChatId ? 'block' : 'none';
+        $('userProfileModal').style.display = 'flex';
+    } catch (e) {}
+}
+
+async function toggleBlockUser() {
+    const isBlocked = $('upBlockBtn').textContent.includes('Unblock');
+    try {
+        const res = await api(`/api/users/${profileUserId}/block`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({action: isBlocked ? 'unblock' : 'block'})
+        });
+        const data = await res.json();
+        $('userProfileModal').style.display = 'none';
+        showToast(data.is_blocked ? '🚫 Blocked' : '🔓 Unblocked');
+        loadChats();
+    } catch (e) {}
+}
+
+function profileGoChat() {
+    if (!profileUserChatId) return;
+    $('userProfileModal').style.display = 'none';
+    const chat = allChats.find(c => c.id === profileUserChatId);
+    if (chat) { selectChat(chat); return; }
+    loadChats().then(() => {
+        const c = allChats.find(x => x.id === profileUserChatId);
+        if (c) selectChat(c);
+    });
+}
+
+// ==================== CHANNELS ====================
+
+function openNewChannel() {
+    $('newChatModal').style.display = 'none';
+    $('newChannelModal').style.display = 'flex';
+    $('channelName').value = '';
+}
+
+async function createChannel() {
+    const name = $('channelName').value.trim();
+    if (!name) { showToast('Channel name required'); return; }
+    try {
+        const res = await api('/api/channel', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({name})
+        });
+        const data = await res.json();
+        $('newChannelModal').style.display = 'none';
+        await loadChats();
+        selectChat(data.chat);
+    } catch (e) {}
+}
+
+async function loadChannels(q) {
+    const url = q ? `/api/channels?q=${encodeURIComponent(q)}` : '/api/channels';
+    try {
+        const res = await api(url);
+        const data = await res.json();
+        const list = $('channelList'); list.innerHTML = '';
+        if (!data.channels?.length) {
+            list.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:8px">No channels found</div>';
+            return;
+        }
+        data.channels.forEach(ch => {
+            const div = document.createElement('div');
+            div.className = 'user-item';
+            div.innerHTML = `<div class="avatar" style="background:var(--bg-search)">📢</div>
+                <div style="flex:1;min-width:0">
+                    <span>${esc(ch.name)}</span>
+                    <span style="display:block;font-size:11px;color:var(--text-muted)">${ch.member_count} subscribers</span>
+                </div>
+                ${ch.subscribed ? '<span style="color:var(--success);font-size:12px">✓</span>' : ''}`;
+            if (!ch.subscribed) div.onclick = () => joinChannel(ch.id);
+            list.appendChild(div);
+        });
+    } catch (e) {}
+}
+
+async function joinChannel(chatId) {
+    try {
+        const res = await api(`/api/chats/${chatId}/join`, {method:'POST'});
+        const data = await res.json();
+        showToast('Joined ' + (data.chat?.name || 'channel'));
+        $('newChatModal').style.display = 'none';
+        await loadChats();
+        selectChat(data.chat);
+    } catch (e) {}
+}
+
+// ==================== POLLS ====================
+
+function newPoll() {
+    $('chatMenuModal').style.display = 'none';
+    $('pollQuestion').value = '';
+    $('pollMultiple').checked = false;
+    $('pollOptions').innerHTML = '';
+    pollOptionCount = 2;
+    for (let i = 0; i < 2; i++) addPollOption();
+    $('pollModal').style.display = 'flex';
+}
+
+function addPollOption() {
+    const inp = document.createElement('input');
+    inp.placeholder = 'Option ' + (pollOptionCount + 1);
+    $('pollOptions').appendChild(inp);
+    pollOptionCount++;
+}
+
+async function createPoll() {
+    const question = $('pollQuestion').value.trim();
+    const options = [...$('pollOptions').querySelectorAll('input')].map(i => i.value.trim()).filter(Boolean);
+    if (!question) { showToast('Question required'); return; }
+    if (options.length < 2) { showToast('At least 2 options needed'); return; }
+    try {
+        const res = await api('/api/poll', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({chat_id: activeChatId, question, options, multiple: $('pollMultiple').checked})
+        });
+        const data = await res.json();
+        if (data.error) { showToast(data.error); return; }
+        $('pollModal').style.display = 'none';
+        appendMessage(data.message);
+        lastMessageId = data.message.id;
+        scrollToBottom();
+        loadChats();
+    } catch (e) { if (e.message !== 'Not authenticated') showToast('Failed to create poll'); }
+}
+
+async function votePoll(pollId, index, e) {
+    e.stopPropagation();
+    try {
+        const res = await api(`/api/poll/${pollId}/vote`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({option_index: index})
+        });
+        const data = await res.json();
+        if (data.message) {
+            const old = document.querySelector(`[data-msg-id="${data.message.id}"]`);
+            if (old) old.replaceWith(createMessageElement(data.message));
+        }
+    } catch (e2) {}
+}
+
+// ==================== SLOW MODE ====================
+
+async function setSlowMode() {
+    $('chatMenuModal').style.display = 'none';
+    const chat = allChats.find(c => c.id === activeChatId);
+    const cur = chat?.slow_mode || 0;
+    const val = prompt('Slow mode in seconds (0 = off, max 300):', String(cur));
+    if (val === null) return;
+    const secs = parseInt(val);
+    if (isNaN(secs) || secs < 0) { showToast('Invalid value'); return; }
+    try {
+        const res = await api(`/api/chats/${activeChatId}/slow_mode`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({seconds: secs})
+        });
+        const data = await res.json();
+        if (data.error) { showToast(data.error); return; }
+        showToast(secs ? `🐢 Slow mode: ${secs}s` : 'Slow mode off');
+        const c = allChats.find(x => x.id === activeChatId);
+        if (c && data.chat) c.slow_mode = data.chat.slow_mode;
+    } catch (e) {}
+}
+
+// ==================== SCHEDULED MESSAGES + AUTODELETE ====================
+
+function toLocalInput(d) {
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function openSchedule() {
+    $('chatMenuModal').style.display = 'none';
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 5);
+    $('scheduleTime').value = toLocalInput(now);
+    $('autodeleteSelect').value = '';
+    $('scheduleModal').style.display = 'flex';
+}
+
+function closeSchedule() {
+    $('scheduleModal').style.display = 'none';
+}
+
+async function scheduleSend() {
+    const timeVal = $('scheduleTime').value;
+    if (!timeVal) { showToast('Choose a time'); return; }
+    const autodel = $('autodeleteSelect').value;
+    const text = $('messageInput').value.trim();
+    if (!text && !pendingFile) { showToast('Nothing to send'); return; }
+    const scheduledAt = new Date(timeVal).toISOString();
+    const autodeleteAt = autodel ? new Date(Date.now() + autodel * 1000).toISOString() : null;
+    const replyId = replyToMsg ? replyToMsg.id : null;
+    cancelReply();
+    closeSchedule();
+
+    if (pendingFile) {
+        const fd = new FormData();
+        fd.append('file', pendingFile.file);
+        fd.append('chat_id', activeChatId);
+        fd.append('scheduled_at', scheduledAt);
+        if (autodeleteAt) fd.append('autodelete_at', autodeleteAt);
+        if (text) fd.append('caption', text);
+        if (replyId) fd.append('reply_to', replyId);
+        pendingFile = null;
+        try {
+            const res = await api('/api/upload', {method:'POST', body:fd});
+            const data = await res.json();
+            if (data.message) {
+                appendMessage(data.message);
+                lastMessageId = data.message.id;
+                showToast('⏰ Scheduled');
+                loadChats();
+            }
+        } catch (e) { if (e.message !== 'Not authenticated') showToast('Upload failed'); }
+        return;
+    }
+
+    const payload = {chat_id: activeChatId, text, scheduled_at: scheduledAt};
+    if (autodeleteAt) payload.autodelete_at = autodeleteAt;
+    if (replyId) payload.reply_to = replyId;
+    try {
+        const res = await api('/api/send', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.error) { showToast(data.error); return; }
+        if (data.message) {
+            $('messageInput').value = '';
+            appendMessage(data.message);
+            lastMessageId = data.message.id;
+            showToast('⏰ Scheduled');
+            loadChats();
+        }
+    } catch (e) { if (e.message !== 'Not authenticated') showToast('Failed to schedule'); }
+}
+
+// ==================== BOTTOM NAV (MOBILE) ====================
+
+function setBnActive(id) {
+    document.querySelectorAll('.bn-item').forEach(b => b.classList.remove('active'));
+    $(id).classList.add('active');
+}
+
+function openNewChatModal() {
+    $('newChatModal').style.display = 'flex';
+    $('newChatSearch').value = '';
+    $('userList').innerHTML = '';
+    searchNewChat('');
+    loadChannels('');
 }
 
 // ==================== UTILITY ====================
@@ -956,6 +1312,61 @@ function esc(text) {
     const d = document.createElement('div');
     d.textContent = text;
     return d.innerHTML;
+}
+
+function md(text) {
+    let t = esc(text);
+    t = t.replace(/```([^`]*)```/g, '<code class="md-code-block">$1</code>');
+    t = t.replace(/`([^`\n]+)`/g, '<code class="md-code">$1</code>');
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    t = t.replace(/\*([^*]+)\*/g, '<i>$1</i>');
+    t = t.replace(/~~([^~]+)~~/g, '<s>$1</s>');
+    return t;
+}
+
+function formatSched(iso) {
+    if (!iso) return 'scheduled';
+    const d = new Date(iso);
+    return d.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+
+function renderPoll(p) {
+    const votes = p.votes || {};
+    const total = Object.values(votes).reduce((s, arr) => s + (arr ? arr.length : 0), 0);
+    const opts = p.options.map((opt, i) => {
+        const arr = votes[String(i)] || [];
+        const count = arr.length;
+        const mine = (p.my_votes || []).includes(i);
+        const pct = total ? Math.round(count / total * 100) : 0;
+        return `<div class="poll-option ${mine ? 'mine' : ''}" onclick="votePoll(${p.id}, ${i}, event)">
+            <div class="poll-bar" style="width:${pct}%"></div>
+            <span class="poll-opt-text">${esc(opt)}</span>
+            <span class="poll-count">${count} · ${pct}%</span>
+        </div>`;
+    }).join('');
+    const hint = p.multiple ? 'multiple choice' : (p.closed ? 'closed' : '');
+    return `<div class="msg-poll">
+        <div class="poll-question">${md(p.question)}</div>
+        ${opts}
+        <div class="poll-total">${total} votes${hint ? ' · ' + hint : ''}</div>
+    </div>`;
+}
+
+async function togglePin(msgId) {
+    try {
+        const res = await api(`/api/messages/${msgId}/pin`, {method:'POST'});
+        const data = await res.json();
+        if (data.error) { showToast(data.error); return; }
+        if (data.message) {
+            const old = document.querySelector(`[data-msg-id="${msgId}"]`);
+            if (old) old.replaceWith(createMessageElement(data.message));
+            const chat = allChats.find(c => c.id === activeChatId);
+            if (chat) {
+                chat.pinned_message = data.message.pinned ? data.message : null;
+                showPinnedBar(chat);
+            }
+        }
+    } catch (e) { if (e.message !== 'Not authenticated') showToast('Failed to pin'); }
 }
 
 // ==================== EVENT LISTENERS ====================
@@ -1030,16 +1441,18 @@ document.querySelector('.burger').onclick = () => {
 $('backBtn').onclick = showSidebar;
 
 // New chat button
-$('newChatBtn').onclick = () => {
-    $('newChatModal').style.display = 'flex';
-    $('newChatSearch').value = '';
-    $('userList').innerHTML = '';
-    searchNewChat('');
-};
+$('newChatBtn').onclick = () => { openNewChatModal(); setBnActive('bnNew'); };
+
+// Bottom nav (mobile)
+$('bnChats').onclick = () => { showSidebar(); setBnActive('bnChats'); };
+$('bnContacts').onclick = () => { openNewChatModal(); setBnActive('bnContacts'); };
+$('bnNew').onclick = () => { openNewChatModal(); setBnActive('bnNew'); };
+$('bnSettings').onclick = () => { openProfile(); setBnActive('bnSettings'); };
 
 // New chat search
 $('newChatSearch').oninput = function() {
     searchNewChat(this.value.trim());
+    loadChannels(this.value.trim());
 };
 
 // Open group creation modal
@@ -1092,6 +1505,49 @@ document.querySelectorAll('.tab').forEach(tab => {
 
 // Settings/Profile button
 $('settingsBtn').onclick = openProfile;
+
+// Avatar upload
+$('avatarUpload').onchange = async function() {
+    const file = this.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+        const res = await api('/api/upload/photo', {method:'POST', body:fd});
+        const data = await res.json();
+        if (data.avatar) {
+            currentUser.avatar = data.avatar;
+            updateMyAvatar();
+            openProfile();
+            showToast('Photo updated');
+        }
+    } catch (e) {}
+};
+
+// Schedule on right-click of send button
+$('sendBtn').addEventListener('contextmenu', e => { e.preventDefault(); openSchedule(); });
+
+// System theme change -> auto theme
+if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+        if ((localStorage.getItem('theme') || 'auto') === 'auto') applyTheme();
+    });
+}
+
+// Swipe gestures on mobile
+let touchStartX = null;
+document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, {passive:true});
+document.addEventListener('touchend', e => {
+    if (touchStartX === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const aside = document.querySelector('aside');
+    if (dx > 70 && aside.classList.contains('hidden') && !e.target.closest('.modal')) {
+        showSidebar();
+    } else if (dx < -70 && !aside.classList.contains('hidden') && isMobile() && !e.target.closest('.modal')) {
+        aside.classList.add('hidden');
+    }
+    touchStartX = null;
+}, {passive:true});
 
 // Reply close
 $('replyClose').onclick = cancelReply;

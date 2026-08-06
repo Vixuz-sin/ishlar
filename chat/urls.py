@@ -30,4 +30,13 @@ urlpatterns = [
     path('api/chats/<int:chat_id>/manage', views.manage_chat, name='manage_chat'),
     path('api/messages/search', views.search_messages, name='search_messages'),
     path('api/chats/<int:chat_id>/media', views.chat_media, name='chat_media'),
+    path('api/messages/<int:message_id>/pin', views.toggle_pin, name='toggle_pin'),
+    path('api/users/<int:user_id>', views.user_profile, name='user_profile'),
+    path('api/users/<int:user_id>/block', views.block_user, name='block_user'),
+    path('api/poll', views.create_poll, name='create_poll'),
+    path('api/poll/<int:poll_id>/vote', views.vote_poll, name='vote_poll'),
+    path('api/channel', views.create_channel, name='create_channel'),
+    path('api/channels', views.search_channels, name='search_channels'),
+    path('api/chats/<int:chat_id>/join', views.join_channel, name='join_channel'),
+    path('api/chats/<int:chat_id>/slow_mode', views.set_slow_mode, name='set_slow_mode'),
 ]

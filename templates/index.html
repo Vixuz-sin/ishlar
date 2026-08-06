@@ -72,6 +72,15 @@
         <span id="chatSearchClose">✕</span>
       </div>
 
+      <div class="pinned-bar" id="pinnedBar" style="display:none" onclick="scrollToMsg(pinnedMsgId)">
+        <span class="pin-icon">📌</span>
+        <div class="pin-info">
+          <span id="pinnedSender"></span>
+          <span id="pinnedText"></span>
+        </div>
+        <span class="pin-close" id="pinnedClose" onclick="event.stopPropagation()">✕</span>
+      </div>
+
       <div class="messages" id="messages"></div>
 
       <div class="reply-preview" id="replyPreview" style="display:none">
@@ -87,7 +96,7 @@
         <button id="recStop">Stop</button>
       </div>
 
-      <div class="input-bar">
+      <div class="input-bar" id="inputBar">
         <span class="input-emoji" id="emojiBtn">😊</span>
         <div class="input-wrapper">
           <input type="text" id="messageInput" placeholder="Write a message..." autocomplete="off">
@@ -97,10 +106,17 @@
           </label>
         </div>
         <span class="input-emoji mic-btn" id="micBtn" title="Voice message">🎤</span>
-        <button class="send-btn" id="sendBtn">➤</button>
+        <button class="send-btn" id="sendBtn" title="Send (right-click to schedule)">➤</button>
       </div>
     </div>
   </main>
+
+  <nav class="bottom-nav" id="bottomNav">
+    <button class="bn-item active" id="bnChats"><span class="bn-icon">💬</span><span class="bn-label">Chats</span></button>
+    <button class="bn-item" id="bnContacts"><span class="bn-icon">👥</span><span class="bn-label">Contacts</span></button>
+    <button class="bn-item" id="bnNew"><span class="bn-icon">✚</span><span class="bn-label">New</span></button>
+    <button class="bn-item" id="bnSettings"><span class="bn-icon">⚙️</span><span class="bn-label">Settings</span></button>
+  </nav>
 </div>
 
 <div class="modal" id="authModal">
@@ -122,6 +138,60 @@
     <input type="text" id="newChatSearch" placeholder="Search users..." autocomplete="off">
     <div class="user-list" id="userList"></div>
     <button id="newGroupOpenBtn" onclick="openNewGroup()" style="margin-top:10px">New Group</button>
+    <button id="newChannelOpenBtn" onclick="openNewChannel()" style="margin-top:8px">📢 New Channel</button>
+    <div style="margin-top:14px">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Discover channels</div>
+      <div class="user-list" id="channelList" style="max-height:140px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="newChannelModal" style="display:none">
+  <div class="modal-content small">
+    <h3>📢 New Channel</h3>
+    <input type="text" id="channelName" placeholder="Channel name" autocomplete="off">
+    <button onclick="createChannel()">Create Channel</button>
+  </div>
+</div>
+
+<div class="modal" id="pollModal" style="display:none">
+  <div class="modal-content small">
+    <h3>📊 New Poll</h3>
+    <input type="text" id="pollQuestion" placeholder="Question" autocomplete="off">
+    <div id="pollOptions"></div>
+    <button id="pollAddOptionBtn" onclick="addPollOption()" style="background:var(--bg-search);color:var(--text);margin-bottom:10px">+ Add option</button>
+    <label class="poll-multiple-label">
+      <input type="checkbox" id="pollMultiple"> Allow multiple answers
+    </label>
+    <button onclick="createPoll()">Create Poll</button>
+  </div>
+</div>
+
+<div class="modal" id="userProfileModal" style="display:none">
+  <div class="modal-content small">
+    <div class="profile-avatar" id="upAvatar"></div>
+    <h3 id="upName" style="text-align:center;font-size:18px;margin-bottom:4px"></h3>
+    <p id="upStatus" style="text-align:center;font-size:13px;margin-bottom:4px"></p>
+    <p id="upBio" style="text-align:center;color:var(--text-secondary);font-size:13px;margin-bottom:12px"></p>
+    <button id="upMessageBtn" onclick="profileGoChat()">💬 Message</button>
+    <button id="upBlockBtn" style="margin-top:8px" onclick="toggleBlockUser()"></button>
+  </div>
+</div>
+
+<div class="modal" id="scheduleModal" style="display:none">
+  <div class="modal-content small">
+    <h3>⏰ Schedule Message</h3>
+    <label class="modal-label">Send at</label>
+    <input type="datetime-local" id="scheduleTime">
+    <label class="modal-label">Auto-delete after</label>
+    <select id="autodeleteSelect">
+      <option value="">Off</option>
+      <option value="3600">1 hour</option>
+      <option value="86400">1 day</option>
+      <option value="604800">1 week</option>
+    </select>
+    <button onclick="scheduleSend()">Schedule</button>
+    <button onclick="closeSchedule()" style="margin-top:8px;background:var(--bg-search);color:var(--text)">Cancel</button>
   </div>
 </div>
 
@@ -139,11 +209,14 @@
 <div class="modal" id="profileModal" style="display:none">
   <div class="modal-content small">
     <h3>My Profile</h3>
-    <div class="profile-avatar" id="profileAvatar"></div>
+    <div class="profile-avatar" id="profileAvatar" onclick="$('avatarUpload').click()" title="Change photo">
+      <span class="avatar-change">📷</span>
+    </div>
+    <input type="file" id="avatarUpload" hidden accept="image/*">
     <input type="text" id="profileBio" placeholder="Bio" maxlength="128">
     <input type="text" id="profilePhone" placeholder="Phone">
     <button onclick="updateProfile()">Save</button>
-    <button id="themeBtn" style="margin-top:8px" onclick="toggleTheme()"></button>
+    <button id="themeBtn" style="margin-top:8px" onclick="cycleTheme()"></button>
   </div>
 </div>
 
@@ -151,10 +224,15 @@
   <div class="modal-content small">
     <h3 id="chatMenuTitle">Chat</h3>
     <div class="menu-list">
+      <div class="menu-item group-only" onclick="newPoll()">📊 New poll</div>
+      <div class="menu-item group-only owner-only" onclick="setSlowMode()">🐢 Slow mode</div>
+      <div class="menu-item private-only" onclick="openUserProfile()">👤 View profile</div>
+      <div class="menu-item" onclick="openSchedule()">⏰ Schedule message</div>
       <div class="menu-item" onclick="openMedia()">🖼️ Media</div>
       <div class="menu-item group-only" onclick="openGroupManage('add')">👥 Add members</div>
       <div class="menu-item group-only" onclick="openGroupManage('remove')">🚫 Remove member</div>
       <div class="menu-item group-only" onclick="renameGroup()">✏️ Rename group</div>
+      <div class="menu-item channel-only" onclick="renameGroup()">✏️ Rename channel</div>
       <div class="menu-item danger" onclick="removeChat()">🗑️ Delete chat</div>
     </div>
   </div>

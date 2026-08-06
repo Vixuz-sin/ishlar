@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import User, Chat, Message, Reaction
+from .models import User, Chat, Message, Reaction, Poll
 from .serializers import UserSerializer, ChatSerializer, MessageSerializer
 
 
@@ -21,6 +21,38 @@ def get_online_status(user):
     if delta.total_seconds() < 300:
         return 'online'
     return 'offline'
+
+
+def parse_dt(value):
+    if not value:
+        return None
+    try:
+        return timezone.datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return None
+
+
+def purge_expired(chat_id):
+    Message.objects.filter(chat_id=chat_id, autodelete_at__lte=timezone.now()).delete()
+
+
+def blocked_by_other(chat, sender):
+    if chat.type != 'private':
+        return False
+    others = chat.members.exclude(id=sender.id)
+    return others.filter(blocked_users=sender).exists()
+
+
+def check_slow_mode(chat, user):
+    if chat.slow_mode <= 0:
+        return None
+    last = Message.objects.filter(chat=chat, sender=user).order_by('-created_at').first()
+    if not last:
+        return None
+    elapsed = (timezone.now() - last.created_at).total_seconds()
+    if elapsed < chat.slow_mode:
+        return int(chat.slow_mode - elapsed) + 1
+    return None
 
 
 @csrf_exempt
@@ -88,6 +120,9 @@ def chats(request):
         chat_list = request.user.chats.all().order_by('-created_at')
         data = []
         for chat in chat_list:
+            if chat.type == 'private' and blocked_by_other(chat, request.user):
+                continue
+            purge_expired(chat.id)
             cd = ChatSerializer(chat, context={'request_user': request.user}).data
             for m in cd['members']:
                 if m['id'] != request.user.id:
@@ -141,6 +176,14 @@ def chat_detail(request, chat_id):
         file_size = request.data.get('file_size', None)
         reply_to_id = request.data.get('reply_to', None)
 
+        if chat.type == 'channel' and chat.owner_id != request.user.id:
+            return Response({'error': 'Only the channel owner can post'}, status=403)
+        if blocked_by_other(chat, request.user):
+            return Response({'error': 'You cannot send messages here'}, status=403)
+        wait = check_slow_mode(chat, request.user)
+        if wait:
+            return Response({'error': f'Slow mode: wait {wait}s'}, status=429)
+
         if not text and not file_path:
             return Response({'error': 'Text or file required'}, status=400)
 
@@ -151,13 +194,20 @@ def chat_detail(request, chat_id):
             except Message.DoesNotExist:
                 pass
 
+        scheduled_at = parse_dt(request.data.get('scheduled_at'))
+        autodelete_at = parse_dt(request.data.get('autodelete_at'))
+        is_future = bool(scheduled_at and scheduled_at > timezone.now())
+
         msg = Message.objects.create(
             chat=chat, sender=request.user, text=text,
             file_path=file_path, file_type=file_type,
-            file_size=file_size, reply_to=reply_to
+            file_size=file_size, reply_to=reply_to,
+            scheduled_at=scheduled_at, autodelete_at=autodelete_at
         )
-        chat.last_message = msg
-        chat.save(update_fields=['last_message'])
+        if not is_future:
+            msg.read_by.add(request.user)
+            chat.last_message = msg
+            chat.save(update_fields=['last_message'])
         return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data}, status=201)
 
 
@@ -180,6 +230,14 @@ def send_message(request):
     if not chat.members.filter(id=request.user.id).exists():
         return Response({'error': 'Forbidden'}, status=403)
 
+    if chat.type == 'channel' and chat.owner_id != request.user.id:
+        return Response({'error': 'Only the channel owner can post'}, status=403)
+    if blocked_by_other(chat, request.user):
+        return Response({'error': 'You cannot send messages here'}, status=403)
+    wait = check_slow_mode(chat, request.user)
+    if wait:
+        return Response({'error': f'Slow mode: wait {wait}s'}, status=429)
+
     text = request.data.get('text', '').strip()
     if not text:
         return Response({'error': 'Text required'}, status=400)
@@ -192,12 +250,18 @@ def send_message(request):
         except (ValueError, Message.DoesNotExist):
             pass
 
+    scheduled_at = parse_dt(request.data.get('scheduled_at'))
+    autodelete_at = parse_dt(request.data.get('autodelete_at'))
+    is_future = bool(scheduled_at and scheduled_at > timezone.now())
+
     msg = Message.objects.create(
-        chat=chat, sender=request.user, text=text, reply_to=reply_to
+        chat=chat, sender=request.user, text=text, reply_to=reply_to,
+        scheduled_at=scheduled_at, autodelete_at=autodelete_at
     )
-    msg.read_by.add(request.user)
-    chat.last_message = msg
-    chat.save(update_fields=['last_message'])
+    if not is_future:
+        msg.read_by.add(request.user)
+        chat.last_message = msg
+        chat.save(update_fields=['last_message'])
     return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data}, status=201)
 
 
@@ -216,7 +280,12 @@ def chat_messages(request, chat_id):
         page = 1
         per_page = 50
 
-    messages = Message.objects.filter(chat_id=chat_id).order_by('-created_at')
+    purge_expired(chat_id)
+    chat = Chat.objects.get(id=chat_id)
+    now = timezone.now()
+    messages = Message.objects.filter(chat=chat).filter(
+        Q(scheduled_at__isnull=True) | Q(scheduled_at__lte=now) | Q(sender=request.user)
+    ).order_by('-created_at')
     total = messages.count()
     start = (page - 1) * per_page
     end = start + per_page
@@ -306,6 +375,11 @@ def poll_messages(request):
     except (TypeError, ValueError):
         return Response({'messages': []})
     messages = Message.objects.filter(chat_id=chat_id, id__gt=after).order_by('created_at')
+    purge_expired(chat_id)
+    now = timezone.now()
+    messages = messages.filter(
+        Q(scheduled_at__isnull=True) | Q(scheduled_at__lte=now) | Q(sender=request.user)
+    )
     return Response({'messages': MessageSerializer(messages, many=True, context={"request_user": request.user}).data})
 
 
@@ -325,6 +399,20 @@ def upload_file(request):
         chat_id = int(chat_id)
     except ValueError:
         return Response({'error': 'Invalid chat_id'}, status=400)
+
+    try:
+        chat = Chat.objects.get(id=chat_id)
+    except Chat.DoesNotExist:
+        return Response({'error': 'Chat not found'}, status=404)
+    if not chat.members.filter(id=request.user.id).exists():
+        return Response({'error': 'Forbidden'}, status=403)
+    if chat.type == 'channel' and chat.owner_id != request.user.id:
+        return Response({'error': 'Only the channel owner can post'}, status=403)
+    if blocked_by_other(chat, request.user):
+        return Response({'error': 'You cannot send messages here'}, status=403)
+    wait = check_slow_mode(chat, request.user)
+    if wait:
+        return Response({'error': f'Slow mode: wait {wait}s'}, status=429)
 
     ext = os.path.splitext(file.name)[1]
     raw_name = hashlib.sha256(f"{timezone.now()}{file.name}".encode()).hexdigest()[:32]
@@ -349,10 +437,13 @@ def upload_file(request):
     msg = Message.objects.create(
         chat_id=chat_id, sender=request.user,
         text=caption or '', file_path=rel_path,
-        file_type=ftype, file_size=file.size, reply_to=reply_to
+        file_type=ftype, file_size=file.size, reply_to=reply_to,
+        scheduled_at=parse_dt(request.data.get('scheduled_at')),
+        autodelete_at=parse_dt(request.data.get('autodelete_at'))
     )
-    msg.read_by.add(request.user)
-    Chat.objects.filter(id=chat_id).update(last_message=msg)
+    if not (msg.scheduled_at and msg.scheduled_at > timezone.now()):
+        msg.read_by.add(request.user)
+        Chat.objects.filter(id=chat_id).update(last_message=msg)
     return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data}, status=201)
 
 
@@ -411,7 +502,7 @@ def create_group(request):
         return Response({'error': 'Group name required'}, status=400)
     if request.user.id not in member_ids:
         member_ids.append(request.user.id)
-    chat = Chat.objects.create(type='group', name=name)
+    chat = Chat.objects.create(type='group', name=name, owner=request.user)
     chat.members.add(*User.objects.filter(id__in=member_ids))
     return Response({'chat': ChatSerializer(chat, context={'request_user': request.user}).data}, status=201)
 
@@ -427,7 +518,11 @@ def mark_read(request, chat_id):
         return Response({'error': 'Chat not found'}, status=404)
     if not chat.members.filter(id=request.user.id).exists():
         return Response({'error': 'Forbidden'}, status=403)
-    msgs = Message.objects.filter(chat=chat).exclude(sender=request.user).exclude(read_by=request.user)
+    now = timezone.now()
+    msgs = Message.objects.filter(chat=chat).exclude(sender=request.user)\
+        .exclude(read_by=request.user).filter(
+            Q(scheduled_at__isnull=True) | Q(scheduled_at__lte=now)
+        )
     request.user.read_messages.add(*list(msgs))
     return Response({'status': 'ok'})
 
@@ -523,7 +618,8 @@ def manage_chat(request, chat_id):
         return Response({'error': 'Chat not found'}, status=404)
     if not chat.members.filter(id=request.user.id).exists():
         return Response({'error': 'Forbidden'}, status=403)
-
+    if chat.type == 'channel' and chat.owner_id != request.user.id:
+        return Response({'error': 'Only the channel owner can manage'}, status=403)
     action = request.data.get('action')
     if action == 'add_members':
         ids = request.data.get('member_ids', [])
@@ -599,3 +695,206 @@ def chat_media(request, chat_id):
         chat_id=chat_id, file_type__in=['photo', 'video']
     ).order_by('-created_at')[:200]
     return Response({'media': MessageSerializer(media, many=True, context={"request_user": request.user}).data})
+
+
+@csrf_exempt
+@api_view(['POST'])
+def toggle_pin(request, message_id):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    try:
+        msg = Message.objects.get(id=message_id)
+    except Message.DoesNotExist:
+        return Response({'error': 'Message not found'}, status=404)
+    if not msg.chat.members.filter(id=request.user.id).exists():
+        return Response({'error': 'Forbidden'}, status=403)
+    if msg.chat.type == 'channel' and msg.chat.owner_id != request.user.id:
+        return Response({'error': 'Only the channel owner can pin'}, status=403)
+    if msg.scheduled_at and msg.scheduled_at > timezone.now():
+        return Response({'error': 'Cannot pin a scheduled message'}, status=400)
+    msg.pinned = not msg.pinned
+    msg.pinned_at = timezone.now() if msg.pinned else None
+    msg.save(update_fields=['pinned', 'pinned_at'])
+    return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data})
+
+
+@api_view(['GET'])
+def user_profile(request, user_id):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=404)
+    data = UserSerializer(user).data
+    data['online_status'] = get_online_status(user)
+    data['is_blocked'] = request.user.blocked_users.filter(id=user.id).exists()
+    data['blocked_me'] = user.blocked_users.filter(id=request.user.id).exists()
+    data['chat_id'] = None
+    for chat in request.user.chats.filter(type='private'):
+        if chat.members.filter(id=user.id).exists():
+            data['chat_id'] = chat.id
+            break
+    return Response({'user': data})
+
+
+@csrf_exempt
+@api_view(['POST'])
+def block_user(request, user_id):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=404)
+    if user.id == request.user.id:
+        return Response({'error': 'Cannot block yourself'}, status=400)
+    action = request.data.get('action', 'block')
+    if action == 'block':
+        request.user.blocked_users.add(user)
+    else:
+        request.user.blocked_users.remove(user)
+    return Response({'status': 'ok', 'is_blocked': action == 'block'})
+
+
+@csrf_exempt
+@api_view(['POST'])
+def create_poll(request):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    chat_id = request.data.get('chat_id')
+    question = (request.data.get('question') or '').strip()
+    options = [str(o).strip() for o in request.data.get('options', []) if str(o).strip()]
+    multiple = bool(request.data.get('multiple'))
+    if not chat_id:
+        return Response({'error': 'chat_id required'}, status=400)
+    if not question:
+        return Response({'error': 'Question required'}, status=400)
+    if len(options) < 2:
+        return Response({'error': 'At least 2 options required'}, status=400)
+    try:
+        chat = Chat.objects.get(id=int(chat_id))
+    except (ValueError, Chat.DoesNotExist):
+        return Response({'error': 'Chat not found'}, status=404)
+    if not chat.members.filter(id=request.user.id).exists():
+        return Response({'error': 'Forbidden'}, status=403)
+    if blocked_by_other(chat, request.user):
+        return Response({'error': 'You cannot send messages here'}, status=403)
+    wait = check_slow_mode(chat, request.user)
+    if wait:
+        return Response({'error': f'Slow mode: wait {wait}s'}, status=429)
+
+    poll = Poll.objects.create(
+        chat=chat, question=question, options=options, multiple=multiple,
+        votes={str(i): [] for i in range(len(options))}
+    )
+    msg = Message.objects.create(
+        chat=chat, sender=request.user, text=question, poll=poll,
+        autodelete_at=parse_dt(request.data.get('autodelete_at'))
+    )
+    msg.read_by.add(request.user)
+    chat.last_message = msg
+    chat.save(update_fields=['last_message'])
+    return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data}, status=201)
+
+
+@csrf_exempt
+@api_view(['POST'])
+def vote_poll(request, poll_id):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    try:
+        poll = Poll.objects.get(id=poll_id)
+    except Poll.DoesNotExist:
+        return Response({'error': 'Poll not found'}, status=404)
+    if not poll.chat.members.filter(id=request.user.id).exists():
+        return Response({'error': 'Forbidden'}, status=403)
+    if poll.closed:
+        return Response({'error': 'Poll closed'}, status=400)
+    try:
+        option_index = int(request.data.get('option_index'))
+    except (TypeError, ValueError):
+        return Response({'error': 'option_index required'}, status=400)
+    if option_index < 0 or option_index >= len(poll.options):
+        return Response({'error': 'Invalid option'}, status=400)
+
+    votes = poll.votes or {}
+    for key in votes:
+        votes[key] = [uid for uid in votes[key] if uid != request.user.id]
+    if not poll.multiple:
+        votes[str(option_index)] = votes.get(str(option_index), []) + [request.user.id]
+    else:
+        current = votes.get(str(option_index), [])
+        if request.user.id in current:
+            votes[str(option_index)] = [uid for uid in current if uid != request.user.id]
+        else:
+            votes[str(option_index)] = current + [request.user.id]
+    poll.votes = votes
+    poll.save(update_fields=['votes'])
+    msg = poll.message
+    return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data})
+
+
+@csrf_exempt
+@api_view(['POST'])
+def create_channel(request):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    name = request.data.get('name', '').strip()
+    if not name:
+        return Response({'error': 'Channel name required'}, status=400)
+    chat = Chat.objects.create(type='channel', name=name, owner=request.user)
+    chat.members.add(request.user)
+    return Response({'chat': ChatSerializer(chat, context={'request_user': request.user}).data}, status=201)
+
+
+@csrf_exempt
+@api_view(['POST'])
+def join_channel(request, chat_id):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    try:
+        chat = Chat.objects.get(id=chat_id)
+    except Chat.DoesNotExist:
+        return Response({'error': 'Channel not found'}, status=404)
+    if chat.type != 'channel':
+        return Response({'error': 'Not a channel'}, status=400)
+    chat.members.add(request.user)
+    return Response({'chat': ChatSerializer(chat, context={'request_user': request.user}).data})
+
+
+@api_view(['GET'])
+def search_channels(request):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    query = request.query_params.get('q', '').strip()
+    channels = Chat.objects.filter(type='channel')
+    if query:
+        channels = channels.filter(name__icontains=query)
+    data = []
+    for ch in channels[:50]:
+        cd = ChatSerializer(ch, context={'request_user': request.user}).data
+        cd['subscribed'] = ch.members.filter(id=request.user.id).exists()
+        cd['member_count'] = ch.members.count()
+        data.append(cd)
+    return Response({'channels': data})
+
+
+@csrf_exempt
+@api_view(['POST'])
+def set_slow_mode(request, chat_id):
+    if not request.user.is_authenticated:
+        return Response({'error': 'Not authenticated'}, status=401)
+    try:
+        chat = Chat.objects.get(id=chat_id)
+    except Chat.DoesNotExist:
+        return Response({'error': 'Chat not found'}, status=404)
+    if chat.type != 'group' or chat.owner_id != request.user.id:
+        return Response({'error': 'Only the group owner can set slow mode'}, status=403)
+    try:
+        seconds = max(0, min(int(request.data.get('seconds', 0)), 300))
+    except (TypeError, ValueError):
+        return Response({'error': 'Invalid seconds'}, status=400)
+    chat.slow_mode = seconds
+    chat.save(update_fields=['slow_mode'])
+    return Response({'chat': ChatSerializer(chat, context={'request_user': request.user}).data})
