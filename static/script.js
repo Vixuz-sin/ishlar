@@ -373,7 +373,7 @@ function createMessageElement(msg) {
 
     let fileHtml = '';
     if (msg.file_path && msg.file_type) {
-        if (msg.file_type === 'photo') {
+        if (msg.file_type === 'photo' || msg.file_type === 'image') {
             fileHtml = `<div class="msg-file"><img src="${msg.file_path}" onclick="window.open(this.src)" loading="lazy"></div>`;
         } else if (msg.file_type === 'video') {
             fileHtml = `<div class="msg-file"><video src="${msg.file_path}" controls preload="metadata" style="max-height:300px"></video></div>`;

@@ -415,8 +415,9 @@ def upload_file(request):
     if wait:
         return Response({'error': f'Slow mode: wait {wait}s'}, status=429)
 
-    ftype = file.content_type.split('/')[0] if '/' in file.content_type else 'file'
-    subfolder = f"{ftype}s"
+    major = file.content_type.split('/')[0] if '/' in file.content_type else 'file'
+    ftype = 'photo' if major == 'image' else major
+    subfolder = 'images' if ftype == 'photo' else f'{ftype}s'
     file_url = save_upload(file, subfolder)
 
     reply_to = None
@@ -668,7 +669,7 @@ def chat_media(request, chat_id):
     if not Chat.objects.filter(id=chat_id, members__id=request.user.id).exists():
         return Response({'error': 'Forbidden'}, status=403)
     media = Message.objects.filter(
-        chat_id=chat_id, file_type__in=['photo', 'video']
+        chat_id=chat_id, file_type__in=['photo', 'image', 'video']
     ).order_by('-created_at')[:200]
     return Response({'media': MessageSerializer(media, many=True, context={"request_user": request.user}).data})
 
