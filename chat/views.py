@@ -8,7 +8,17 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from django.views.decorators.csrf import csrf_exempt
+from rest_framework.authentication import SessionAuthentication
+from functools import wraps
+
+
+def csrf_required(view):
+    """DRF view uchun CSRF tekshiruvi (login/register kabi AllowAny view'lar uchun)."""
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        SessionAuthentication().enforce_csrf(request)
+        return view(request, *args, **kwargs)
+    return wrapper
 
 from .models import User, Chat, Message, Reaction, Poll
 from .serializers import UserSerializer, ChatSerializer, MessageSerializer
@@ -55,9 +65,9 @@ def check_slow_mode(chat, user):
     return None
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@csrf_required
 def register(request):
     username = request.data.get('username', '').strip()
     password = request.data.get('password', '')
@@ -77,9 +87,9 @@ def register(request):
     return Response({'user': UserSerializer(user).data}, status=201)
 
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@csrf_required
 def login(request):
     username = request.data.get('username', '').strip()
     password = request.data.get('password', '')
@@ -94,7 +104,6 @@ def login(request):
     return Response({'user': UserSerializer(user).data})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def logout(request):
     dj_logout(request)
@@ -110,7 +119,6 @@ def me(request):
     return Response({'user': data})
 
 
-@csrf_exempt
 @api_view(['GET', 'POST'])
 def chats(request):
     if not request.user.is_authenticated:
@@ -152,7 +160,6 @@ def chats(request):
     return Response({'chat': ChatSerializer(chat).data}, status=201)
 
 
-@csrf_exempt
 @api_view(['GET', 'POST'])
 def chat_detail(request, chat_id):
     if not request.user.is_authenticated:
@@ -211,7 +218,6 @@ def chat_detail(request, chat_id):
         return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data}, status=201)
 
 
-@csrf_exempt
 @api_view(['POST'])
 def send_message(request):
     if not request.user.is_authenticated:
@@ -309,7 +315,6 @@ def get_message(request, message_id):
     return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data})
 
 
-@csrf_exempt
 @api_view(['DELETE'])
 def delete_message(request, message_id):
     if not request.user.is_authenticated:
@@ -322,7 +327,6 @@ def delete_message(request, message_id):
         return Response({'error': 'Not found or not yours'}, status=404)
 
 
-@csrf_exempt
 @api_view(['PATCH'])
 def edit_message(request, message_id):
     if not request.user.is_authenticated:
@@ -383,7 +387,6 @@ def poll_messages(request):
     return Response({'messages': MessageSerializer(messages, many=True, context={"request_user": request.user}).data})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def upload_file(request):
     if not request.user.is_authenticated:
@@ -447,7 +450,6 @@ def upload_file(request):
     return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data}, status=201)
 
 
-@csrf_exempt
 @api_view(['POST'])
 def upload_photo(request):
     if not request.user.is_authenticated:
@@ -467,7 +469,6 @@ def upload_photo(request):
     return Response({'avatar': f'/uploads/avatars/{filename}'})
 
 
-@csrf_exempt
 @api_view(['PATCH'])
 def update_profile(request):
     if not request.user.is_authenticated:
@@ -491,7 +492,6 @@ def online_users(request):
     return Response({'users': UserSerializer(users, many=True).data})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def create_group(request):
     if not request.user.is_authenticated:
@@ -507,7 +507,6 @@ def create_group(request):
     return Response({'chat': ChatSerializer(chat, context={'request_user': request.user}).data}, status=201)
 
 
-@csrf_exempt
 @api_view(['POST'])
 def mark_read(request, chat_id):
     if not request.user.is_authenticated:
@@ -527,7 +526,6 @@ def mark_read(request, chat_id):
     return Response({'status': 'ok'})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def send_typing(request):
     if not request.user.is_authenticated:
@@ -555,7 +553,6 @@ def poll_typing(request):
     return Response({'typing': [u.username for u in typers]})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def forward_message(request, message_id):
     if not request.user.is_authenticated:
@@ -590,7 +587,6 @@ def forward_message(request, message_id):
     return Response({'messages': created}, status=201)
 
 
-@csrf_exempt
 @api_view(['DELETE'])
 def delete_chat(request, chat_id):
     if not request.user.is_authenticated:
@@ -607,7 +603,6 @@ def delete_chat(request, chat_id):
     return Response({'status': 'ok'})
 
 
-@csrf_exempt
 @api_view(['POST', 'PATCH'])
 def manage_chat(request, chat_id):
     if not request.user.is_authenticated:
@@ -639,7 +634,6 @@ def manage_chat(request, chat_id):
     return Response({'error': 'Unknown action'}, status=400)
 
 
-@csrf_exempt
 @api_view(['POST'])
 def react_message(request, message_id):
     if not request.user.is_authenticated:
@@ -697,7 +691,6 @@ def chat_media(request, chat_id):
     return Response({'media': MessageSerializer(media, many=True, context={"request_user": request.user}).data})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def toggle_pin(request, message_id):
     if not request.user.is_authenticated:
@@ -738,7 +731,6 @@ def user_profile(request, user_id):
     return Response({'user': data})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def block_user(request, user_id):
     if not request.user.is_authenticated:
@@ -757,7 +749,6 @@ def block_user(request, user_id):
     return Response({'status': 'ok', 'is_blocked': action == 'block'})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def create_poll(request):
     if not request.user.is_authenticated:
@@ -798,7 +789,6 @@ def create_poll(request):
     return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data}, status=201)
 
 
-@csrf_exempt
 @api_view(['POST'])
 def vote_poll(request, poll_id):
     if not request.user.is_authenticated:
@@ -835,7 +825,6 @@ def vote_poll(request, poll_id):
     return Response({'message': MessageSerializer(msg, context={"request_user": request.user}).data})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def create_channel(request):
     if not request.user.is_authenticated:
@@ -848,7 +837,6 @@ def create_channel(request):
     return Response({'chat': ChatSerializer(chat, context={'request_user': request.user}).data}, status=201)
 
 
-@csrf_exempt
 @api_view(['POST'])
 def join_channel(request, chat_id):
     if not request.user.is_authenticated:
@@ -880,7 +868,6 @@ def search_channels(request):
     return Response({'channels': data})
 
 
-@csrf_exempt
 @api_view(['POST'])
 def set_slow_mode(request, chat_id):
     if not request.user.is_authenticated:

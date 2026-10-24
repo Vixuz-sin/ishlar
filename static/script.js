@@ -22,6 +22,30 @@ let pollOptionCount = 2;
 
 function $(id) { return document.getElementById(id); }
 
+// --- CSRF himoyasi ---
+// Django har bir POST/PUT/PATCH/DELETE so'rovda X-CSRFToken talab qiladi.
+function getCsrfToken() {
+    const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+const _originalFetch = window.fetch.bind(window);
+window.fetch = function (url, opts = {}) {
+    const method = (opts.method || 'GET').toUpperCase();
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const token = getCsrfToken();
+        if (token) {
+            if (opts.headers instanceof Headers) {
+                opts.headers.set('X-CSRFToken', token);
+            } else {
+                opts.headers = opts.headers || {};
+                opts.headers['X-CSRFToken'] = token;
+            }
+        }
+    }
+    return _originalFetch(url, opts);
+};
+
 function showToast(msg) {
     const t = $('toast');
     t.textContent = msg; t.style.display = 'block';

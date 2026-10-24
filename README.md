@@ -164,7 +164,7 @@ python manage.py collectstatic --noinput && python manage.py migrate
 ## 🗺 Reja (roadmap)
 
 - [ ] Media fayllarni cloud storage'ga ko'chirish (Supabase Storage / S3)
-- [ ] CSRF himoyasini to'g'ri sozlash yoki token autentifikatsiyaga o'tish
+- [x] CSRF himoyasini to'g'ri sozlash yoki token autentifikatsiyaga o'tish
 - [ ] WebSocket orqali real-time (hozir polling ishlatiladi)
 - [ ] Testlar yozish
 - [ ] `views.py`ni modullarga bo'lish
