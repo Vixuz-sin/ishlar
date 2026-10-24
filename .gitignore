@@ -18,6 +18,11 @@ media/
 # Muhit
 .env
 .env.local
+.env.*.local
+!.env.example
+
+# Vercel
+.vercel/
 
 # IDE
 .idea/
