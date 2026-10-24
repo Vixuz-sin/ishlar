@@ -3,6 +3,8 @@
 Django + REST API + vanilla JavaScript asosida yozilgan **Telegram'ga o'xshash messenjer**.
 Loyiha o'quv maqsadida yaratilgan: real vaqtga yaqin chat, guruhlar, kanallar va PWA qo'llab-quvvatlaydi.
 
+🔗 **Demo:** https://ishlar-42gy.vercel.app
+
 ## ✨ Funksiyalar
 
 **Autentifikatsiya**
