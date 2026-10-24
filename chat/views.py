@@ -1,6 +1,3 @@
-import os
-import hashlib
-from django.conf import settings
 from django.utils import timezone
 from django.db.models import Q, Count
 from django.contrib.auth import authenticate, login as dj_login, logout as dj_logout
@@ -22,6 +19,7 @@ def csrf_required(view):
 
 from .models import User, Chat, Message, Reaction, Poll
 from .serializers import UserSerializer, ChatSerializer, MessageSerializer
+from .storage import save_upload
 
 
 def get_online_status(user):
@@ -417,19 +415,10 @@ def upload_file(request):
     if wait:
         return Response({'error': f'Slow mode: wait {wait}s'}, status=429)
 
-    ext = os.path.splitext(file.name)[1]
-    raw_name = hashlib.sha256(f"{timezone.now()}{file.name}".encode()).hexdigest()[:32]
     ftype = file.content_type.split('/')[0] if '/' in file.content_type else 'file'
     subfolder = f"{ftype}s"
-    filename = f"{raw_name}{ext}"
+    file_url = save_upload(file, subfolder)
 
-    upload_dir = os.path.join(settings.MEDIA_ROOT, subfolder)
-    os.makedirs(upload_dir, exist_ok=True)
-    with open(os.path.join(upload_dir, filename), 'wb+') as dest:
-        for chunk in file.chunks():
-            dest.write(chunk)
-
-    rel_path = f"{subfolder}/{filename}"
     reply_to = None
     if reply_to_id:
         try:
@@ -439,7 +428,7 @@ def upload_file(request):
 
     msg = Message.objects.create(
         chat_id=chat_id, sender=request.user,
-        text=caption or '', file_path=rel_path,
+        text=caption or '', file_path=file_url,
         file_type=ftype, file_size=file.size, reply_to=reply_to,
         scheduled_at=parse_dt(request.data.get('scheduled_at')),
         autodelete_at=parse_dt(request.data.get('autodelete_at'))
@@ -457,16 +446,9 @@ def upload_photo(request):
     file = request.FILES.get('file')
     if not file:
         return Response({'error': 'No file'}, status=400)
-    ext = os.path.splitext(file.name)[1]
-    raw_name = hashlib.sha256(f"{timezone.now()}{file.name}".encode()).hexdigest()[:32]
-    filename = f"{raw_name}{ext}"
-    upload_dir = os.path.join(settings.MEDIA_ROOT, 'avatars')
-    os.makedirs(upload_dir, exist_ok=True)
-    with open(os.path.join(upload_dir, filename), 'wb+') as dest:
-        for chunk in file.chunks():
-            dest.write(chunk)
-    User.objects.filter(id=request.user.id).update(avatar=filename)
-    return Response({'avatar': f'/uploads/avatars/{filename}'})
+    avatar_url = save_upload(file, 'avatars')
+    User.objects.filter(id=request.user.id).update(avatar=avatar_url)
+    return Response({'avatar': avatar_url})
 
 
 @api_view(['PATCH'])

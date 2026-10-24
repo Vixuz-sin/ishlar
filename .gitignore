@@ -33,3 +33,5 @@ media/
 # OS
 Thumbs.db
 desktop.ini
+
+.env*

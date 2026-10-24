@@ -19,6 +19,7 @@ let pinnedMsgId = null;
 let profileUserId = null;
 let profileUserChatId = null;
 let pollOptionCount = 2;
+const MAX_UPLOAD = 4 * 1024 * 1024; // Vercel serverless limiti (~4.5 MB)
 
 function $(id) { return document.getElementById(id); }
 
@@ -450,6 +451,10 @@ function scrollToMsg(id) {
 async function sendMessage() {
     const text = $('messageInput').value.trim();
     if (!text && !pendingFile) return;
+    if (pendingFile && pendingFile.file.size > MAX_UPLOAD) {
+        showToast('Fayl juda katta (maks. 4 MB)');
+        return;
+    }
 
     if (pendingFile) {
         const fd = new FormData();
@@ -574,6 +579,7 @@ async function startRecording() {
             clearInterval(recTimer);
             const blob = new Blob(chunks, {type:'audio/webm'});
             if (!blob.size || !activeChatId) return;
+            if (blob.size > MAX_UPLOAD) { showToast('Ovoz juda katta (maks. 4 MB)'); return; }
             const fd = new FormData();
             fd.append('file', blob, 'voice.webm');
             fd.append('chat_id', activeChatId);
@@ -1534,6 +1540,7 @@ $('settingsBtn').onclick = openProfile;
 $('avatarUpload').onchange = async function() {
     const file = this.files[0];
     if (!file) return;
+    if (file.size > MAX_UPLOAD) { showToast('Rasm juda katta (maks. 4 MB)'); this.value = ''; return; }
     const fd = new FormData();
     fd.append('file', file);
     try {

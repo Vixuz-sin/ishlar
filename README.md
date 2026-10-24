@@ -38,6 +38,7 @@ Loyiha o'quv maqsadida yaratilgan: real vaqtga yaqin chat, guruhlar, kanallar va
 | Ma'lumotlar bazasi | PostgreSQL (production) / SQLite (lokal) |
 | Frontend | HTML, CSS, vanilla JavaScript (SPA) |
 | Static fayllar | WhiteNoise |
+| Media fayllar | Vercel Blob (production) / lokal `uploads/` (development) |
 | Deploy | Vercel (serverless) |
 
 ## 🚀 Lokalda ishga tushirish
@@ -84,6 +85,9 @@ CSRF_COOKIE_SECURE=False
 > ⚠️ `SESSION_COOKIE_SECURE=True` bo'lsa, lokal `http://` da login ishlamaydi — shuning uchun lokalda `False` qiling.
 > Production'da esa albatta `True` bo'lishi kerak.
 
+> 📎 `BLOB_READ_WRITE_TOKEN` ixtiyoriy: bo'lmasa rasm/ovoz/fayllar lokal `uploads/` papkasiga saqlanadi.
+> Production'da Vercel Blob store ulangan bo'lishi kerak (quyida ko'ring).
+
 ### 4. Migratsiyalar va server
 
 ```bash
@@ -106,6 +110,7 @@ Admin: http://127.0.0.1:8000/admin
 | `CSRF_TRUSTED_ORIGINS` | ❌ | Ishonchli domenlar (vergul bilan) |
 | `SESSION_COOKIE_SECURE` | ❌ | Production'da `True` |
 | `CSRF_COOKIE_SECURE` | ❌ | Production'da `True` |
+| `BLOB_READ_WRITE_TOKEN` | ❌ | Vercel Blob tokeni. Bo'lmasa fayllar lokal `uploads/`ga saqlanadi |
 
 ## 📁 Loyiha tuzilishi
 
@@ -116,7 +121,7 @@ chat/
   models.py             # User, Chat, Message, Poll, Reaction
   views.py              # 37 ta API endpoint
   urls.py               # URL marshrutlari
-  auth.py               # Session autentifikatsiya
+  storage.py            # Media fayllar (Vercel Blob / lokal)
   serializers.py
   migrations/
 telegram_django/
@@ -158,12 +163,14 @@ Barcha endpointlar `/api/` bilan boshlanadi.
 python manage.py collectstatic --noinput && python manage.py migrate
 ```
 
-> **Muhim:** Vercel'da fayl tizimi vaqtinchalik. `uploads/` papkasiga saqlangan rasm va ovozli xabarlar
-> qayta deploy bo'lganda o'chib ketadi. Buning uchun Supabase Storage yoki S3 ishlatish kerak.
+> **Media fayllar:** rasm, ovoz va fayllar **Vercel Blob**'ga yuklanadi (production), shuning uchun
+> qayta deploy bo'lganda o'chib ketmaydi. Lokalda token bo'lmasa `uploads/` papkasi ishlatiladi.
+> Blob store yaratish: `vercel blob create-store ishlar-media --access public` — bu
+> `BLOB_READ_WRITE_TOKEN`ni avtomatik qo'shadi.
 
 ## 🗺 Reja (roadmap)
 
-- [ ] Media fayllarni cloud storage'ga ko'chirish (Supabase Storage / S3)
+- [x] Media fayllarni cloud storage'ga ko'chirish (Vercel Blob)
 - [x] CSRF himoyasini to'g'ri sozlash yoki token autentifikatsiyaga o'tish
 - [ ] WebSocket orqali real-time (hozir polling ishlatiladi)
 - [ ] Testlar yozish

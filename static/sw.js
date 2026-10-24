@@ -1,4 +1,4 @@
-const CACHE = 'tg-cache-v2';
+const CACHE = 'tg-cache-v3';
 const ASSETS = [
   '/',
   '/static/style.css',
