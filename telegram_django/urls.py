@@ -4,7 +4,9 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.http import FileResponse
 from django.shortcuts import render
+from django.views.decorators.csrf import ensure_csrf_cookie
 
+@ensure_csrf_cookie
 def index(request):
     return render(request, 'index.html')
 
