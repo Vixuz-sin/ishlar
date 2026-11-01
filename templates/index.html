@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#141c38">
+<meta name="theme-color" content="#17212b">
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" type="image/png" href="/static/icon-192.png">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
@@ -19,12 +19,12 @@
       <div class="burger" id="burgerBtn"><span></span><span></span><span></span></div>
       <h1>Telegram</h1>
       <div class="aside-icons">
-        <span id="searchToggle">🔍</span>
-        <span id="newChatBtn">✎</span>
+        <span id="searchToggle" role="button" tabindex="0" aria-label="Search"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></span>
+        <span id="newChatBtn" role="button" tabindex="0" aria-label="New chat"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg></span>
       </div>
     </div>
     <div class="search-bar" id="searchBar" style="display:none">
-      <input type="text" id="searchInput" placeholder="Search users or chats..." autocomplete="off">
+      <input type="text" id="searchInput" placeholder="Search" autocomplete="off">
     </div>
     <div class="chat-tabs">
       <span class="tab active" data-tab="all">All</span>
@@ -38,7 +38,7 @@
         <span id="currentUsername"></span>
       </div>
       <div class="cu-right">
-        <span id="settingsBtn" title="Settings">⚙️</span>
+        <span id="settingsBtn" role="button" tabindex="0" title="Settings" aria-label="Settings"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></span>
         <button onclick="logout()">Logout</button>
       </div>
     </div>
@@ -46,15 +46,13 @@
 
   <main id="mainArea">
     <div class="no-chat" id="noChat">
-      <div class="no-chat-icon">💬</div>
-      <h3>Telegram Clone</h3>
       <p>Select a chat to start messaging</p>
     </div>
 
     <div class="chat-view" id="chatView" style="display:none">
       <div class="main-header" id="mainHeader">
         <div class="main-header-left">
-          <div class="back-btn" id="backBtn">←</div>
+          <div class="back-btn" id="backBtn" role="button" tabindex="0" aria-label="Back"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></div>
           <div class="avatar small" id="chatAvatar"></div>
           <div>
             <h2 id="chatName">Loading...</h2>
@@ -62,14 +60,14 @@
           </div>
         </div>
         <div class="main-header-right">
-          <span id="chatSearchBtn">🔍</span>
-          <span id="chatMenuBtn">⋮</span>
+          <span id="chatSearchBtn" role="button" tabindex="0" aria-label="Search messages"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></span>
+          <span id="chatMenuBtn" role="button" tabindex="0" aria-label="More"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg></span>
         </div>
       </div>
 
       <div class="chat-search" id="chatSearch" style="display:none">
         <input type="text" id="chatSearchInput" placeholder="Search messages..." autocomplete="off">
-        <span id="chatSearchClose">✕</span>
+        <span id="chatSearchClose" role="button" tabindex="0" aria-label="Close search"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
       </div>
 
       <div class="pinned-bar" id="pinnedBar" style="display:none" onclick="scrollToMsg(pinnedMsgId)">
@@ -78,7 +76,7 @@
           <span id="pinnedSender"></span>
           <span id="pinnedText"></span>
         </div>
-        <span class="pin-close" id="pinnedClose" onclick="event.stopPropagation()">✕</span>
+        <span class="pin-close" id="pinnedClose" onclick="event.stopPropagation()"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
       </div>
 
       <div class="messages" id="messages"></div>
@@ -88,7 +86,7 @@
           <span class="reply-label" id="replyLabel">Replying</span>
           <span class="reply-text" id="replyText"></span>
         </div>
-        <span class="reply-close" id="replyClose">✕</span>
+        <span class="reply-close" id="replyClose" role="button" tabindex="0" aria-label="Cancel reply"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
       </div>
 
       <div class="recording-bar" id="recordingBar" style="display:none">
@@ -97,33 +95,33 @@
       </div>
 
       <div class="input-bar" id="inputBar">
-        <span class="input-emoji" id="emojiBtn">😊</span>
         <div class="input-wrapper">
-          <input type="text" id="messageInput" placeholder="Write a message..." autocomplete="off">
-          <label class="attach-btn">
-            📎
+          <span class="input-emoji" id="emojiBtn" role="button" tabindex="0" aria-label="Emoji"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/></svg></span>
+          <input type="text" id="messageInput" placeholder="Message" autocomplete="off">
+          <label class="attach-btn" aria-label="Attach file">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m20 11.5-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>
             <input type="file" id="fileInput" hidden multiple accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.zip">
           </label>
         </div>
-        <span class="input-emoji mic-btn" id="micBtn" title="Voice message">🎤</span>
-        <button class="send-btn" id="sendBtn" title="Send (right-click to schedule)">➤</button>
+        <span class="mic-btn" id="micBtn" role="button" tabindex="0" title="Voice message" aria-label="Record voice message"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></span>
+        <button class="send-btn" id="sendBtn" title="Send (right-click to schedule)" aria-label="Send"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4 16-4-6.5L4 12Z"/><path d="m12 13.5 8-9.5"/></svg></button>
       </div>
     </div>
   </main>
 
   <nav class="bottom-nav" id="bottomNav">
-    <button class="bn-item active" id="bnChats"><span class="bn-icon">💬</span><span class="bn-label">Chats</span></button>
-    <button class="bn-item" id="bnContacts"><span class="bn-icon">👥</span><span class="bn-label">Contacts</span></button>
-    <button class="bn-item" id="bnNew"><span class="bn-icon">✚</span><span class="bn-label">New</span></button>
-    <button class="bn-item" id="bnSettings"><span class="bn-icon">⚙️</span><span class="bn-label">Settings</span></button>
+    <button class="bn-item active" id="bnChats"><span class="bn-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/></svg></span><span class="bn-label">Chats</span></button>
+    <button class="bn-item" id="bnContacts"><span class="bn-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg></span><span class="bn-label">Contacts</span></button>
+    <button class="bn-item" id="bnNew"><span class="bn-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span class="bn-label">New</span></button>
+    <button class="bn-item" id="bnSettings"><span class="bn-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></span><span class="bn-label">Settings</span></button>
   </nav>
 </div>
 
 <div class="modal" id="authModal">
   <div class="modal-content">
-    <div class="modal-icon">✉️</div>
-    <h2>Telegram Clone</h2>
-    <p>Sign in to start messaging</p>
+    <div class="modal-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 21 4l-3 16-6-4.5L3 11.5Z"/><path d="m12 15.5-2 4.5v-6l8-7"/></svg></div>
+    <h2>Telegram</h2>
+    <p>Sign in with your username and password.</p>
     <input type="text" id="authUsername" placeholder="Username" autocomplete="off">
     <input type="password" id="authPassword" placeholder="Password">
     <div class="modal-error" id="authError"></div>

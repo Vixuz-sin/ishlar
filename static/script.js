@@ -130,7 +130,7 @@ function updateMyAvatar() {
 }
 
 function avatarColor(id) {
-    const colors = ['#1f3fa8','#1a8f89','#b3542e','#6b4fa0','#3d6f2f','#2d6fb5','#a8456b','#7a6a2a'];
+    const colors = ['#e17076','#faa774','#a695e7','#7bc862','#6ec9cb','#65aadd','#ee7aae'];
     return colors[id % colors.length];
 }
 
@@ -174,7 +174,7 @@ function renderChatList(chats) {
         const isChannel = chat.type === 'channel';
         const name = chat.name || other?.username || 'Saved Messages';
         const initial = (name[0] || '#').toUpperCase();
-        const isOnline = other?.online_status === 'online' && !isChannel;
+        const isOnline = chat.type === 'private' && other?.online_status === 'online';
         const last = chat.last_message || {};
         const time = last.created_at ? formatTime(last.created_at) : '';
         const unread = chat.unread_count || 0;
@@ -182,13 +182,13 @@ function renderChatList(chats) {
         let avatarHtml;
         if (isChannel) {
             avatarHtml = '<div class="avatar" style="background:var(--bg-search)">📢</div>';
-        } else if (other?.avatar) {
+        } else if (other?.avatar && chat.type === 'private') {
             avatarHtml = `<div class="avatar ${isOnline ? 'online-dot' : ''}"><img src="${other.avatar}"></div>`;
         } else {
             avatarHtml = `<div class="avatar ${isOnline ? 'online-dot' : ''}" style="background:${avatarColor(chat.id)}">${initial}</div>`;
         }
 
-        let lastText = last.poll ? '📊 Poll' : (last.text || last.file_type || 'No messages yet');
+        let lastText = last.poll ? '📊 Poll' : (last.text?.replace(/\*\*|~~|`/g, '') || last.file_type || 'No messages yet');
         if (last.is_scheduled) lastText = '⏰ ' + lastText;
 
         div.innerHTML = avatarHtml + `
@@ -226,26 +226,21 @@ async function selectChat(chat) {
     const other = chat.members.find(m => m.id !== currentUser?.id);
     const isChannel = chat.type === 'channel';
     const name = chat.name || other?.username || 'Saved Messages';
-    const isOnline = other?.online_status === 'online' && !isChannel;
+    const isOnline = chat.type === 'private' && other?.online_status === 'online';
 
     $('noChat').style.display = 'none';
     $('chatView').style.display = 'flex';
     $('chatName').textContent = name;
-    if (isChannel) {
-        $('chatStatus').textContent = (chat.is_owner ? 'Owner · ' : '') + (chat.members?.length || 0) + ' subscribers';
-        $('chatStatus').className = 'status';
-    } else {
-        $('chatStatus').textContent = isOnline ? 'online' : 'offline';
-        $('chatStatus').className = 'status ' + (isOnline ? 'online' : 'offline');
-    }
+    setChatStatus(chat);
 
     const ca = $('chatAvatar');
     if (isChannel) {
         ca.textContent = '📢';
         ca.style.background = 'var(--bg-search)';
         ca.className = 'avatar small';
-    } else if (other?.avatar) {
+    } else if (other?.avatar && chat.type === 'private') {
         ca.innerHTML = `<img src="${other.avatar}">`;
+        ca.style.background = '';
         ca.className = 'avatar small';
     } else {
         ca.textContent = (name[0] || '#').toUpperCase();
@@ -311,6 +306,7 @@ async function loadOlderMessages(chatId, page) {
         const frag = document.createDocumentFragment();
         items.forEach(msg => frag.appendChild(createMessageElement(msg)));
         m.prepend(frag);
+        decorateMessages();
         m.scrollTop = m.scrollHeight - oldHeight;
     } catch (e) {}
 }
@@ -340,11 +336,8 @@ async function pollTyping(chatId) {
         if (data.typing?.length) {
             st.textContent = data.typing.length === 1 ? `${data.typing[0]} typing...` : 'typing...';
             st.className = 'status typing';
-        } else {
-            const other = allChats.find(c => c.id === chatId)?.members.find(m => m.id !== currentUser?.id);
-            const isOnline = other?.online_status === 'online';
-            st.textContent = isOnline ? 'online' : 'offline';
-            st.className = 'status ' + (isOnline ? 'online' : 'offline');
+        } else if (chat) {
+            setChatStatus(chat);
         }
     } catch (e) {}
 }
@@ -363,6 +356,63 @@ function sendTyping() {
 
 function appendMessage(msg) {
     $('messages').appendChild(createMessageElement(msg));
+    decorateMessages();
+}
+
+// Telegram-style grouping: date pills, bubble tails on the last message of a
+// run, and the sender name only on the first one.
+function decorateMessages() {
+    const box = $('messages');
+    box.querySelectorAll('.date-divider').forEach(d => d.remove());
+    const items = [...box.querySelectorAll('.msg')];
+    items.forEach((el, i) => {
+        const prev = items[i - 1];
+        const next = items[i + 1];
+        const sameRun = (a, b) => a && b && a.dataset.sender === b.dataset.sender && a.dataset.day === b.dataset.day;
+        el.classList.toggle('continued', sameRun(prev, el));
+        el.classList.toggle('tail', !sameRun(el, next));
+        if (el.dataset.day && (!prev || prev.dataset.day !== el.dataset.day)) {
+            const d = document.createElement('div');
+            d.className = 'date-divider';
+            d.innerHTML = `<span>${dayLabel(el.dataset.day)}</span>`;
+            el.before(d);
+        }
+    });
+}
+
+function dayLabel(dayString) {
+    const d = new Date(dayString);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return 'Today';
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return 'Yesterday';
+    const opts = {month:'long', day:'numeric'};
+    if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString([], opts);
+}
+
+function clockTime(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+
+function setChatStatus(chat) {
+    const st = $('chatStatus');
+    if (chat.type === 'channel') {
+        const n = chat.members?.length || 0;
+        st.textContent = `${n} subscriber${n === 1 ? '' : 's'}`;
+        st.className = 'status';
+    } else if (chat.type === 'group') {
+        const n = chat.members?.length || 0;
+        const online = (chat.members || []).filter(m => m.online_status === 'online').length;
+        st.textContent = `${n} member${n === 1 ? '' : 's'}` + (online ? `, ${online} online` : '');
+        st.className = 'status';
+    } else {
+        const other = chat.members.find(m => m.id !== currentUser?.id);
+        const isOnline = other?.online_status === 'online';
+        st.textContent = isOnline ? 'online' : 'last seen recently';
+        st.className = 'status ' + (isOnline ? 'online' : 'offline');
+    }
 }
 
 function createMessageElement(msg) {
@@ -370,6 +420,9 @@ function createMessageElement(msg) {
     const div = document.createElement('div');
     div.className = `msg ${isOwn ? 'msg-right' : 'msg-left'}` + (msg.pinned ? ' pinned-msg' : '');
     div.dataset.msgId = msg.id;
+    div.dataset.sender = msg.sender?.id ?? '';
+    div.dataset.day = msg.created_at ? new Date(msg.created_at).toDateString() : '';
+    const showSender = !isOwn && msg.sender && allChats.find(c => c.id === activeChatId)?.type === 'group';
 
     let fileHtml = '';
     if (msg.file_path && msg.file_type) {
@@ -396,7 +449,6 @@ function createMessageElement(msg) {
 
     const edited = msg.edited ? '<span class="msg-edited">edited</span>' : '';
     const check = isOwn ? `<span class="msg-check">${msg.read ? '✓✓' : '✓'}</span>` : '';
-    const time = formatTime(msg.created_at);
     const pinBadge = msg.pinned ? '<span class="pin-badge">📌</span>' : '';
     const schedBadge = msg.is_scheduled ? `<span class="sched-badge">⏰ ${formatSched(msg.scheduled_at)}</span> ` : '';
 
@@ -424,14 +476,14 @@ function createMessageElement(msg) {
 
     div.innerHTML = actions + `
         <div class="msg-bubble ${replyHtml ? 'replying' : ''}">
-            ${!isOwn && msg.sender ? `<div class="msg-sender">${esc(msg.sender.username)}</div>` : ''}
+            ${showSender ? `<div class="msg-sender" style="color:${avatarColor(msg.sender.id)}">${esc(msg.sender.username)}</div>` : ''}
             ${replyHtml}
             ${fileHtml}
             ${pollHtml}
             ${msg.text ? `<div class="msg-text">${md(msg.text)}</div>` : ''}
             ${reactionsHtml}
             <div class="msg-meta">
-                ${schedBadge}${pinBadge} ${edited} <span class="msg-time">${time}</span> ${check}
+                ${schedBadge}${pinBadge}${edited}<span class="msg-time">${clockTime(msg.created_at)}</span>${check}
             </div>
         </div>
     `;
@@ -463,6 +515,7 @@ async function sendMessage() {
         if (text) fd.append('caption', text);
         if (replyToMsg) fd.append('reply_to', replyToMsg.id);
         pendingFile = null;
+        updateSendButton();
         cancelReply();
         try {
             const res = await api('/api/upload', {method:'POST', body:fd});
@@ -490,6 +543,7 @@ async function sendMessage() {
         if (data.error) { showToast(data.error); return; }
         if (data.message) {
             $('messageInput').value = '';
+            updateSendButton();
             appendMessage(data.message);
             lastMessageId = data.message.id;
             scrollToBottom(); loadChats();
@@ -531,7 +585,7 @@ async function editMessage(msgId) {
         });
         const data = await res.json();
         if (data.message) {
-            el.querySelector('.msg-text').textContent = data.message.text;
+            el.querySelector('.msg-text').innerHTML = md(data.message.text);
             if (!el.querySelector('.msg-edited')) {
                 const meta = el.querySelector('.msg-meta');
                 meta.insertBefore(document.createElement('span'), meta.firstChild);
@@ -558,6 +612,7 @@ async function uploadFile(input) {
     if (!file) return;
     const type = file.type.split('/')[0] || 'application';
     pendingFile = {file, type};
+    updateSendButton();
     showToast(`📎 ${file.name} attached`);
     input.value = '';
 }
@@ -622,7 +677,7 @@ function openForward(msgId) {
         const name = c.name || other?.username || 'Saved Messages';
         const div = document.createElement('div');
         div.className = 'user-item';
-        div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${(name[0]||'#').toUpperCase()}</div><span>${esc(name)}</span>`;
+        div.innerHTML = `<div class="avatar" style="background:${avatarColor(c.id)}">${(name[0]||'#').toUpperCase()}</div><span>${esc(name)}</span>`;
         div.onclick = () => doForward(c.id);
         list.appendChild(div);
     });
@@ -694,7 +749,7 @@ async function openGroupManage(mode) {
             if (u.id === currentUser?.id) return;
             const div = document.createElement('div');
             div.className = 'user-item';
-            div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span><span style="color:var(--danger);margin-left:auto">✕</span>`;
+            div.innerHTML = `<div class="avatar" style="background:${avatarColor(u.id)}">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span><span style="color:var(--danger);margin-left:auto">✕</span>`;
             div.onclick = () => removeGroupMember(u.id);
             list.appendChild(div);
         });
@@ -714,7 +769,7 @@ function renderGroupAddSearch(q) {
             if (memberIds.includes(u.id)) return;
             const div = document.createElement('div');
             div.className = 'user-item';
-            div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
+            div.innerHTML = `<div class="avatar" style="background:${avatarColor(u.id)}">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
             div.onclick = async () => {
                 try {
                     await api(`/api/chats/${activeChatId}/manage`, {
@@ -796,7 +851,7 @@ async function reactToMessage(msgId, emoji) {
         const data = await res.json();
         if (data.message) {
             const old = document.querySelector(`[data-msg-id="${msgId}"]`);
-            if (old) old.replaceWith(createMessageElement(data.message));
+            if (old) { old.replaceWith(createMessageElement(data.message)); decorateMessages(); }
         }
     } catch (e) {}
 }
@@ -895,7 +950,7 @@ async function searchUsers(query) {
             div.className = 'chat-item';
             const initial = u.username[0].toUpperCase();
             div.innerHTML = `
-                <div class="avatar" style="background:var(--accent);color:var(--on-accent)">${initial}</div>
+                <div class="avatar" style="background:${avatarColor(u.id)}">${initial}</div>
                 <div class="chat-preview">
                     <div class="chat-top"><span class="chat-name">${esc(u.username)}</span></div>
                     <div class="chat-bottom"><span class="chat-msg">Click to chat</span></div>
@@ -920,7 +975,7 @@ function renderUserList(users) {
     users.forEach(u => {
         const div = document.createElement('div');
         div.className = 'user-item';
-        div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
+        div.innerHTML = `<div class="avatar" style="background:${avatarColor(u.id)}">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
         div.onclick = () => { createPrivateChat(u); $('newChatModal').style.display = 'none'; };
         ul.appendChild(div);
     });
@@ -939,7 +994,7 @@ function renderGroupSearch(query) {
                 if (groupMembers.find(m => m.id === u.id)) return;
                 const div = document.createElement('div');
                 div.className = 'user-item';
-                div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
+                div.innerHTML = `<div class="avatar" style="background:${avatarColor(u.id)}">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
                 div.onclick = () => addGroupMember(u);
                 ul.appendChild(div);
             });
@@ -954,14 +1009,14 @@ function addGroupMember(user) {
     $('groupUserList').innerHTML = '';
 }
 
-function removeGroupMember(id) {
+function removeSelectedMember(id) {
     groupMembers = groupMembers.filter(m => m.id !== id);
     renderSelectedUsers();
 }
 
 function renderSelectedUsers() {
     const el = $('selectedUsers');
-    el.innerHTML = groupMembers.map(m => `<span onclick="removeGroupMember(${m.id})">${esc(m.username)} ✕</span>`).join('');
+    el.innerHTML = groupMembers.map(m => `<span onclick="removeSelectedMember(${m.id})">${esc(m.username)} ✕</span>`).join('');
 }
 
 async function createGroup() {
@@ -1202,7 +1257,7 @@ async function votePoll(pollId, index, e) {
         const data = await res.json();
         if (data.message) {
             const old = document.querySelector(`[data-msg-id="${data.message.id}"]`);
-            if (old) old.replaceWith(createMessageElement(data.message));
+            if (old) { old.replaceWith(createMessageElement(data.message)); decorateMessages(); }
         }
     } catch (e2) {}
 }
@@ -1296,6 +1351,7 @@ async function scheduleSend() {
         if (data.error) { showToast(data.error); return; }
         if (data.message) {
             $('messageInput').value = '';
+            updateSendButton();
             appendMessage(data.message);
             lastMessageId = data.message.id;
             showToast('⏰ Scheduled');
@@ -1389,7 +1445,7 @@ async function togglePin(msgId) {
         if (data.error) { showToast(data.error); return; }
         if (data.message) {
             const old = document.querySelector(`[data-msg-id="${msgId}"]`);
-            if (old) old.replaceWith(createMessageElement(data.message));
+            if (old) { old.replaceWith(createMessageElement(data.message)); decorateMessages(); }
             const chat = allChats.find(c => c.id === activeChatId);
             if (chat) {
                 chat.pinned_message = data.message.pinned ? data.message : null;
@@ -1421,8 +1477,11 @@ $('messageInput').onkeydown = function(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 };
 
-// Typing indicator
-$('messageInput').oninput = sendTyping;
+// Typing indicator + mic/send swap
+function updateSendButton() {
+    $('inputBar').classList.toggle('has-content', !!$('messageInput').value.trim() || !!pendingFile);
+}
+$('messageInput').oninput = () => { sendTyping(); updateSendButton(); };
 
 // Send button
 $('sendBtn').onclick = sendMessage;
@@ -1440,8 +1499,8 @@ $('chatMenuBtn').onclick = openChatMenu;
 // Chat search
 $('chatSearchBtn').onclick = () => {
     const sb = $('chatSearch');
-    sb.style.display = sb.style.display === 'none' ? 'block' : 'none';
-    if (sb.style.display === 'block') $('chatSearchInput').focus();
+    sb.style.display = sb.style.display === 'none' ? 'flex' : 'none';
+    if (sb.style.display === 'flex') $('chatSearchInput').focus();
 };
 $('chatSearchClose').onclick = () => {
     $('chatSearch').style.display = 'none';
@@ -1596,15 +1655,16 @@ $('emojiBtn').onclick = function() {
     emojiPickerVisible = true;
     const picker = document.createElement('div');
     picker.id = 'emojiPicker';
-    picker.style.cssText = 'position:fixed;bottom:70px;left:16px;background:var(--bg-modal);border:1px solid var(--border);border-radius:12px;padding:10px;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;z-index:50;box-shadow:var(--shadow)';
+    picker.className = 'emoji-picker';
+    const r = this.getBoundingClientRect();
+    picker.style.left = Math.max(8, r.left - 4) + 'px';
+    picker.style.bottom = (window.innerHeight - r.top + 12) + 'px';
     emojis.forEach(e => {
         const s = document.createElement('span');
         s.textContent = e;
-        s.style.cssText = 'width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:8px;font-size:20px;transition:0.15s';
-        s.onmouseenter = function() { this.style.background = 'var(--bg-hover)'; };
-        s.onmouseleave = function() { this.style.background = 'transparent'; };
         s.onclick = () => {
             $('messageInput').value += e;
+            updateSendButton();
             $('messageInput').focus();
             picker.remove();
             emojiPickerVisible = false;
@@ -1613,7 +1673,7 @@ $('emojiBtn').onclick = function() {
     });
     document.body.appendChild(picker);
     const closePicker = (e) => {
-        if (!picker.contains(e.target) && e.target !== this) {
+        if (!picker.contains(e.target) && !this.contains(e.target)) {
             picker.remove(); emojiPickerVisible = false;
             document.removeEventListener('click', closePicker);
         }
@@ -1621,8 +1681,8 @@ $('emojiBtn').onclick = function() {
     setTimeout(() => document.addEventListener('click', closePicker), 100);
 };
 
-// Add reply on message right-click or long tap
-document.addEventListener('click', function(e) {
+// Double-click a message to reply, like Telegram Desktop
+document.addEventListener('dblclick', function(e) {
     const msgEl = e.target.closest('.msg');
     if (!msgEl) return;
     if (e.target.closest('.msg-actions') || e.target.closest('.msg-file') || e.target.closest('.reply-badge') || e.target.closest('.reaction-row')) return;
