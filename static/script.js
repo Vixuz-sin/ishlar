@@ -130,7 +130,7 @@ function updateMyAvatar() {
 }
 
 function avatarColor(id) {
-    const colors = ['#2AABEE','#E53935','#43A047','#FB8C00','#8E24AA','#00ACC1','#F4511E','#3949AB'];
+    const colors = ['#1f3fa8','#1a8f89','#b3542e','#6b4fa0','#3d6f2f','#2d6fb5','#a8456b','#7a6a2a'];
     return colors[id % colors.length];
 }
 
@@ -622,7 +622,7 @@ function openForward(msgId) {
         const name = c.name || other?.username || 'Saved Messages';
         const div = document.createElement('div');
         div.className = 'user-item';
-        div.innerHTML = `<div class="avatar" style="background:#2AABEE">${(name[0]||'#').toUpperCase()}</div><span>${esc(name)}</span>`;
+        div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${(name[0]||'#').toUpperCase()}</div><span>${esc(name)}</span>`;
         div.onclick = () => doForward(c.id);
         list.appendChild(div);
     });
@@ -694,7 +694,7 @@ async function openGroupManage(mode) {
             if (u.id === currentUser?.id) return;
             const div = document.createElement('div');
             div.className = 'user-item';
-            div.innerHTML = `<div class="avatar" style="background:#2AABEE">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span><span style="color:var(--danger);margin-left:auto">✕</span>`;
+            div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span><span style="color:var(--danger);margin-left:auto">✕</span>`;
             div.onclick = () => removeGroupMember(u.id);
             list.appendChild(div);
         });
@@ -714,7 +714,7 @@ function renderGroupAddSearch(q) {
             if (memberIds.includes(u.id)) return;
             const div = document.createElement('div');
             div.className = 'user-item';
-            div.innerHTML = `<div class="avatar" style="background:#2AABEE">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
+            div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
             div.onclick = async () => {
                 try {
                     await api(`/api/chats/${activeChatId}/manage`, {
@@ -895,7 +895,7 @@ async function searchUsers(query) {
             div.className = 'chat-item';
             const initial = u.username[0].toUpperCase();
             div.innerHTML = `
-                <div class="avatar" style="background:#2AABEE">${initial}</div>
+                <div class="avatar" style="background:var(--accent);color:var(--on-accent)">${initial}</div>
                 <div class="chat-preview">
                     <div class="chat-top"><span class="chat-name">${esc(u.username)}</span></div>
                     <div class="chat-bottom"><span class="chat-msg">Click to chat</span></div>
@@ -920,7 +920,7 @@ function renderUserList(users) {
     users.forEach(u => {
         const div = document.createElement('div');
         div.className = 'user-item';
-        div.innerHTML = `<div class="avatar" style="background:#2AABEE">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
+        div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
         div.onclick = () => { createPrivateChat(u); $('newChatModal').style.display = 'none'; };
         ul.appendChild(div);
     });
@@ -939,7 +939,7 @@ function renderGroupSearch(query) {
                 if (groupMembers.find(m => m.id === u.id)) return;
                 const div = document.createElement('div');
                 div.className = 'user-item';
-                div.innerHTML = `<div class="avatar" style="background:#2AABEE">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
+                div.innerHTML = `<div class="avatar" style="background:var(--accent);color:var(--on-accent)">${u.username[0].toUpperCase()}</div><span>${esc(u.username)}</span>`;
                 div.onclick = () => addGroupMember(u);
                 ul.appendChild(div);
             });
