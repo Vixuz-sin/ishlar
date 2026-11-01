@@ -1,4 +1,4 @@
-const CACHE = 'tg-cache-v4';
+const CACHE = 'tg-cache-v5';
 const ASSETS = [
   '/',
   '/static/style.css',
@@ -25,16 +25,15 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) return;
 
+  // Network first so new deploys show up immediately; the cache is only
+  // the offline fallback.
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(res => {
-        if (res.ok && url.origin === location.origin) {
-          const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
-        }
-        return res;
-      }).catch(() => cached);
-    })
+    fetch(e.request).then(res => {
+      if (res.ok && url.origin === location.origin) {
+        const clone = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+      }
+      return res;
+    }).catch(() => caches.match(e.request))
   );
 });
